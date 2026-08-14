@@ -38,7 +38,7 @@ create table public.audit_log (
 );
 
 create function public.current_role() returns public.app_role language sql stable security definer set search_path=public as $$select role from profiles where id=auth.uid()$$;
-create function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name,role) values(new.id,new.email,coalesce(new.raw_user_meta_data->>'full_name',''),case when not exists(select 1 from profiles) then 'admin'::app_role else 'viewer'::app_role end);return new;end$$;
+create function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name,role) values(new.id,new.email,coalesce(new.raw_user_meta_data->>'full_name',''),case when lower(new.email)='danielle@focusquest.com' or not exists(select 1 from profiles) then 'admin'::app_role else 'viewer'::app_role end);return new;end$$;
 create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
 create function public.touch_updated_at() returns trigger language plpgsql as $$begin new.updated_at=now();return new;end$$;
 create trigger agents_updated before update on public.agents for each row execute procedure public.touch_updated_at();

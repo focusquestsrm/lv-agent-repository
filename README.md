@@ -2,11 +2,12 @@
 
 A clean, production-oriented Netlify + Supabase application for cataloging AI agents, preserving prompt history, managing approvals, evaluating responsible-AI controls, and enforcing Admin/Editor/Viewer access.
 
-This package contains no demonstration records. The first person who creates an account becomes the administrator; every later account starts as a viewer.
+This package contains no demonstration records. `danielle@focusquest.com` and the first person who creates an account become administrators; every later account starts as a viewer.
 
 ## Included
 
 - Email/password authentication
+- Self-service account creation and password recovery
 - Empty agent directory with governed intake
 - Immutable prompt-version records
 - Two-person approval control: authors cannot approve their own change
@@ -60,7 +61,11 @@ The service-role variable is used only by the invitation function. When using pl
 
 ## 4. Create the first administrator
 
-Use **Create account** in the deployed application. The database trigger assigns the first account the `admin` role. Sign out and back in if the role does not appear immediately.
+Use **Join workspace** in the deployed application. The database trigger assigns `danielle@focusquest.com` and the first registered account the `admin` role. Sign out and back in if the role does not appear immediately.
+
+If you already ran the original schema, run `supabase/migrations/002_self_service_auth.sql` once in the Supabase SQL Editor before creating or signing into `danielle@focusquest.com`.
+
+The sign-in screen also includes **Forgot your password?**. It sends a Supabase recovery email back to the application, where the user chooses and confirms a new password.
 
 For security, disable open sign-ups in Supabase after the first administrator is created if accounts should only be invitation-based. The administrator invitation function is available at `/api/invite-user` for connection to the Users screen.
 
