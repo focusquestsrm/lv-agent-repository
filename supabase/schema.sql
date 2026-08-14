@@ -8,12 +8,24 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
   full_name text,
-  role public.app_role not null default 'viewer',
+  role public.app_role not null default 'editor',
   status text not null default 'active' check (status in ('active','suspended')),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
+create table public.companies (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  description text,
+  website text,
+  status text not null default 'active' check (status in ('active','inactive')),
+  created_by uuid not null references public.profiles(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.profiles add column company_id uuid references public.companies(id) on delete set null;
 create table public.agents (
   id uuid primary key default gen_random_uuid(), name text not null, description text not null,
+  company_id uuid references public.companies(id) on delete set null,
   owner_name text not null, platform text not null, environment text not null, url text,
   status public.workflow_status not null default 'draft', risk_level public.risk_level not null default 'low',
   governance_score integer check(governance_score between 0 and 100), created_by uuid not null references public.profiles(id),
@@ -38,15 +50,19 @@ create table public.audit_log (
 );
 
 create function public.current_role() returns public.app_role language sql stable security definer set search_path=public as $$select role from profiles where id=auth.uid()$$;
-create function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name,role) values(new.id,new.email,coalesce(new.raw_user_meta_data->>'full_name',''),case when lower(new.email)='danielle@focusquest.com' or not exists(select 1 from profiles) then 'admin'::app_role else 'viewer'::app_role end);return new;end$$;
+create function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name,role) values(new.id,new.email,coalesce(new.raw_user_meta_data->>'full_name',''),case when lower(new.email)='danielle@focusquest.com' or not exists(select 1 from profiles) then 'admin'::app_role else 'editor'::app_role end);return new;end$$;
 create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
 create function public.touch_updated_at() returns trigger language plpgsql as $$begin new.updated_at=now();return new;end$$;
 create trigger agents_updated before update on public.agents for each row execute procedure public.touch_updated_at();
 create trigger profiles_updated before update on public.profiles for each row execute procedure public.touch_updated_at();
+create trigger companies_updated before update on public.companies for each row execute procedure public.touch_updated_at();
 
-alter table public.profiles enable row level security;alter table public.agents enable row level security;alter table public.prompt_versions enable row level security;alter table public.governance_reviews enable row level security;alter table public.audit_log enable row level security;
+alter table public.profiles enable row level security;alter table public.companies enable row level security;alter table public.agents enable row level security;alter table public.prompt_versions enable row level security;alter table public.governance_reviews enable row level security;alter table public.audit_log enable row level security;
 create policy "authenticated read profiles" on public.profiles for select to authenticated using(true);
 create policy "admins update profiles" on public.profiles for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
+create policy "authenticated read companies" on public.companies for select to authenticated using(true);
+create policy "admins create companies" on public.companies for insert to authenticated with check(public.current_role()='admin' and created_by=auth.uid());
+create policy "admins update companies" on public.companies for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
 create policy "authenticated read agents" on public.agents for select to authenticated using(true);
 create policy "editors create agents" on public.agents for insert to authenticated with check(public.current_role() in ('admin','editor'));
 create policy "editors update agents" on public.agents for update to authenticated using(public.current_role() in ('admin','editor')) with check(public.current_role() in ('admin','editor'));
@@ -57,4 +73,4 @@ create policy "authenticated read governance" on public.governance_reviews for s
 create policy "editors create governance" on public.governance_reviews for insert to authenticated with check(public.current_role() in ('admin','editor') and reviewer_id=auth.uid());
 create policy "admins update governance" on public.governance_reviews for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
 create policy "authenticated read audit" on public.audit_log for select to authenticated using(true);
-create index agents_status_idx on public.agents(status);create index versions_agent_idx on public.prompt_versions(agent_id,version_number desc);create index versions_status_idx on public.prompt_versions(status);create index reviews_agent_idx on public.governance_reviews(agent_id);create index audit_created_idx on public.audit_log(created_at desc);
+create index profiles_company_idx on public.profiles(company_id);create index agents_company_idx on public.agents(company_id);create index agents_status_idx on public.agents(status);create index versions_agent_idx on public.prompt_versions(agent_id,version_number desc);create index versions_status_idx on public.prompt_versions(status);create index reviews_agent_idx on public.governance_reviews(agent_id);create index audit_created_idx on public.audit_log(created_at desc);

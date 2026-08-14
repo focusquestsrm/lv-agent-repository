@@ -2,13 +2,17 @@
 
 A clean, production-oriented Netlify + Supabase application for cataloging AI agents, preserving prompt history, managing approvals, evaluating responsible-AI controls, and enforcing Admin/Editor/Viewer access.
 
-This package contains no demonstration records. `danielle@focusquest.com` and the first person who creates an account become administrators; every later account starts as a viewer.
+This package contains no demonstration records. `danielle@focusquest.com` and the first person who creates an account become administrators; every later account starts as an editor.
 
 ## Included
 
 - Email/password authentication
 - Self-service account creation and password recovery
 - Empty agent directory with governed intake
+- Admin-managed Lead Ventures companies
+- Required company selection during agent intake
+- Company assignment for users
+- Portfolio dashboard for agents, companies, owners, status, risk, and governance
 - Immutable prompt-version records
 - Two-person approval control: authors cannot approve their own change
 - Governance categories for fairness, privacy, accuracy, safety, transparency, and security
@@ -63,7 +67,12 @@ The service-role variable is used only by the invitation function. When using pl
 
 Use **Join workspace** in the deployed application. The database trigger assigns `danielle@focusquest.com` and the first registered account the `admin` role. Sign out and back in if the role does not appear immediately.
 
-If you already ran the original schema, run `supabase/migrations/002_self_service_auth.sql` once in the Supabase SQL Editor before creating or signing into `danielle@focusquest.com`.
+If you already ran the original schema, run these migrations in order in the Supabase SQL Editor:
+
+1. `supabase/migrations/002_self_service_auth.sql`
+2. `supabase/migrations/003_companies_dashboard.sql`
+
+Do not rerun `schema.sql` on an existing installation. After migration 003, open **Companies** as an Admin and add each Lead Ventures company. Existing agents and users can then be assigned to the appropriate company.
 
 The sign-in screen also includes **Forgot your password?**. It sends a Supabase recovery email back to the application, where the user chooses and confirms a new password.
 
@@ -77,11 +86,12 @@ For security, disable open sign-ups in Supabase after the first administrator is
 | Add agents and prompt versions | ✓ | ✓ | — |
 | Complete governance reviews | ✓ | ✓ | — |
 | Approve and publish another person’s prompt | ✓ | — | — |
-| Change user roles | ✓ | — | — |
+| Change user roles and company assignments | ✓ | — | — |
+| Add and manage companies | ✓ | — | — |
 
 ## Guided tour
 
-The tour opens automatically the first time a person enters the registry. Its steps adapt to the signed-in role: administrators see user-access guidance, while editors and viewers receive instructions appropriate to their permissions. Completion is stored only in that browser as a UI preference. Users can restart it from **Take a tour** in the application header.
+The tour opens automatically the first time a person enters the registry. Its steps adapt to the signed-in role: administrators see company and user-access guidance, while editors and viewers receive instructions appropriate to their permissions. Completion is stored only in that browser as a UI preference. Users can restart it from **Take a tour** in the application header.
 
 ## Recommended production hardening
 
