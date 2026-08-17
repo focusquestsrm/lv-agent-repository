@@ -9,6 +9,8 @@ create table public.profiles (
   email text not null unique,
   full_name text,
   role public.app_role not null default 'editor',
+  can_assign_reviews boolean not null default false,
+  can_approve_agents boolean not null default false,
   status text not null default 'active' check (status in ('active','suspended')),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
@@ -28,8 +30,24 @@ create table public.agents (
   company_id uuid references public.companies(id) on delete set null,
   owner_name text not null, platform text not null, environment text not null, url text,
   status public.workflow_status not null default 'draft', risk_level public.risk_level not null default 'low',
+  agent_scope text not null default 'individual' check (agent_scope in ('individual','team','enterprise')),
+  category text, department text,
+  uses_database boolean not null default false, uses_api boolean not null default false,
+  uses_sensitive_data boolean not null default false, crosses_departments boolean not null default false,
+  technical_review_required boolean not null default false, routing_notes text,
   governance_score integer check(governance_score between 0 and 100), created_by uuid not null references public.profiles(id),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table public.approval_assignments (
+  id uuid primary key default gen_random_uuid(),
+  agent_id uuid not null references public.agents(id) on delete cascade,
+  reviewer_id uuid not null references public.profiles(id) on delete cascade,
+  required boolean not null default true,
+  status text not null default 'assigned' check (status in ('assigned','discussion_needed','approved','changes_requested')),
+  routing_reason text, reviewer_notes text,
+  assigned_by uuid not null references public.profiles(id),
+  assigned_at timestamptz not null default now(), decided_at timestamptz,
+  unique(agent_id,reviewer_id)
 );
 create table public.prompt_versions (
   id uuid primary key default gen_random_uuid(), agent_id uuid not null references public.agents(id) on delete cascade,
@@ -50,14 +68,18 @@ create table public.audit_log (
 );
 
 create function public.current_role() returns public.app_role language sql stable security definer set search_path=public as $$select role from profiles where id=auth.uid()$$;
+create function public.can_route_reviews() returns boolean language sql stable security definer set search_path=public as $$select exists(select 1 from profiles where id=auth.uid() and (role='admin' or can_assign_reviews=true))$$;
+create function public.can_approve_agent() returns boolean language sql stable security definer set search_path=public as $$select exists(select 1 from profiles where id=auth.uid() and (role='admin' or can_approve_agents=true))$$;
 create function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into profiles(id,email,full_name,role) values(new.id,new.email,coalesce(new.raw_user_meta_data->>'full_name',''),case when lower(new.email)='danielle@focusquest.com' or not exists(select 1 from profiles) then 'admin'::app_role else 'editor'::app_role end);return new;end$$;
 create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
 create function public.touch_updated_at() returns trigger language plpgsql as $$begin new.updated_at=now();return new;end$$;
 create trigger agents_updated before update on public.agents for each row execute procedure public.touch_updated_at();
 create trigger profiles_updated before update on public.profiles for each row execute procedure public.touch_updated_at();
 create trigger companies_updated before update on public.companies for each row execute procedure public.touch_updated_at();
+create function public.sync_agent_approval_status() returns trigger language plpgsql security definer set search_path=public as $$begin update agents set status=case when exists(select 1 from approval_assignments where agent_id=new.agent_id and required and status='changes_requested') then 'changes_requested'::workflow_status when exists(select 1 from approval_assignments where agent_id=new.agent_id and required and status<>'approved') then 'pending'::workflow_status when exists(select 1 from approval_assignments where agent_id=new.agent_id and required) then 'approved'::workflow_status else 'pending'::workflow_status end where id=new.agent_id;return new;end$$;
+create trigger sync_agent_approval_status after insert or update on public.approval_assignments for each row execute procedure public.sync_agent_approval_status();
 
-alter table public.profiles enable row level security;alter table public.companies enable row level security;alter table public.agents enable row level security;alter table public.prompt_versions enable row level security;alter table public.governance_reviews enable row level security;alter table public.audit_log enable row level security;
+alter table public.profiles enable row level security;alter table public.companies enable row level security;alter table public.agents enable row level security;alter table public.approval_assignments enable row level security;alter table public.prompt_versions enable row level security;alter table public.governance_reviews enable row level security;alter table public.audit_log enable row level security;
 create policy "authenticated read profiles" on public.profiles for select to authenticated using(true);
 create policy "admins update profiles" on public.profiles for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
 create policy "authenticated read companies" on public.companies for select to authenticated using(true);
@@ -66,6 +88,10 @@ create policy "admins update companies" on public.companies for update to authen
 create policy "authenticated read agents" on public.agents for select to authenticated using(true);
 create policy "editors create agents" on public.agents for insert to authenticated with check(public.current_role() in ('admin','editor'));
 create policy "editors update agents" on public.agents for update to authenticated using(public.current_role() in ('admin','editor')) with check(public.current_role() in ('admin','editor'));
+create policy "authenticated read approval assignments" on public.approval_assignments for select to authenticated using(true);
+create policy "coordinators assign reviews" on public.approval_assignments for insert to authenticated with check(public.can_route_reviews() and assigned_by=auth.uid());
+create policy "coordinators update routing" on public.approval_assignments for update to authenticated using(public.can_route_reviews()) with check(public.can_route_reviews());
+create policy "reviewers decide assignments" on public.approval_assignments for update to authenticated using(reviewer_id=auth.uid() and public.can_approve_agent() and not exists(select 1 from public.agents a where a.id=agent_id and a.created_by=auth.uid())) with check(reviewer_id=auth.uid());
 create policy "authenticated read versions" on public.prompt_versions for select to authenticated using(true);
 create policy "editors create versions" on public.prompt_versions for insert to authenticated with check(public.current_role() in ('admin','editor') and created_by=auth.uid());
 create policy "admins approve versions" on public.prompt_versions for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin' and approved_by=auth.uid() and created_by<>auth.uid());
@@ -73,4 +99,4 @@ create policy "authenticated read governance" on public.governance_reviews for s
 create policy "editors create governance" on public.governance_reviews for insert to authenticated with check(public.current_role() in ('admin','editor') and reviewer_id=auth.uid());
 create policy "admins update governance" on public.governance_reviews for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
 create policy "authenticated read audit" on public.audit_log for select to authenticated using(true);
-create index profiles_company_idx on public.profiles(company_id);create index agents_company_idx on public.agents(company_id);create index agents_status_idx on public.agents(status);create index versions_agent_idx on public.prompt_versions(agent_id,version_number desc);create index versions_status_idx on public.prompt_versions(status);create index reviews_agent_idx on public.governance_reviews(agent_id);create index audit_created_idx on public.audit_log(created_at desc);
+create index profiles_company_idx on public.profiles(company_id);create index agents_company_idx on public.agents(company_id);create index agents_status_idx on public.agents(status);create index approval_agent_idx on public.approval_assignments(agent_id);create index approval_reviewer_idx on public.approval_assignments(reviewer_id,status);create index versions_agent_idx on public.prompt_versions(agent_id,version_number desc);create index versions_status_idx on public.prompt_versions(status);create index reviews_agent_idx on public.governance_reviews(agent_id);create index audit_created_idx on public.audit_log(created_at desc);

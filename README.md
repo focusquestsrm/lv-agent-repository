@@ -13,6 +13,10 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 - Required company selection during agent intake
 - Company assignment for users
 - Portfolio dashboard for agents, companies, owners, status, risk, and governance
+- Adaptive approval routing for individual versus technical/integrated agents
+- Multiple required or advisory reviewers per agent
+- Configurable review coordinators and designated approvers
+- Pre-build agent request and requirements-gathering approval gate
 - Immutable prompt-version records
 - Two-person approval control: authors cannot approve their own change
 - Governance categories for fairness, privacy, accuracy, safety, transparency, and security
@@ -27,9 +31,10 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
-4. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
-5. Copy the Project URL and anonymous/public key from **Project Settings → API**.
+3. For a brand-new installation, also run `supabase/migrations/005_prebuild_agent_requests.sql` once to add the pre-build requirements workflow.
+4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
+5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
+6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
 
 The service-role key must never be placed in a browser variable, committed, or prefixed with `VITE_`.
 
@@ -71,8 +76,14 @@ If you already ran the original schema, run these migrations in order in the Sup
 
 1. `supabase/migrations/002_self_service_auth.sql`
 2. `supabase/migrations/003_companies_dashboard.sql`
+3. `supabase/migrations/004_adaptive_approval_workflow.sql`
+4. `supabase/migrations/005_prebuild_agent_requests.sql`
 
 Do not rerun `schema.sql` on an existing installation. After migration 003, open **Companies** as an Admin and add each Lead Ventures company. Existing agents and users can then be assigned to the appropriate company.
+
+After migration 004, use **Users & Access** to enable **Can assign reviews** for Eli and **Can approve agents** for Danielle, Sean, and any other designated reviewers. Technical or cross-functional agents are flagged during intake; Admins and review coordinators can assign multiple required or advisory reviewers. An agent cannot reach approved status until every required reviewer has approved it.
+
+Migration 005 adds the requirements gate. Team members submit an Agent Request before development begins. The intake captures the business problem, desired outcome, users, current process, success measures, data, integrations, affected areas, scope, and risk indicators. Admins and review coordinators assign multiple reviewers. Only a request with all required approvals can be marked **Build authorized** and converted into an agent record.
 
 The sign-in screen also includes **Forgot your password?**. It sends a Supabase recovery email back to the application, where the user chooses and confirms a new password.
 
