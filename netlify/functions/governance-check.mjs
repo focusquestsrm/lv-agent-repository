@@ -1,5 +1,5 @@
 const categories = ["Fairness & bias", "Privacy & data", "Accuracy & grounding", "Safety & oversight", "Transparency", "Security"];
-const system = "You are an enterprise AI governance reviewer. Assess only evidence in the submitted registry entry. Do not invent risks. Low risk stays low. Medium, high, or critical risk requires a concrete actionable finding. Return JSON only with risk_level, governance_score, summary, and exactly six checks. Each check must contain category, score, status (passed, attention, or failed), and findings.";
+const system = "You are an enterprise AI governance reviewer. Assess only evidence in the submitted repository resource. Do not invent risks. Low risk stays low. Medium, high, or critical risk requires a concrete actionable finding. Return JSON only with risk_level, governance_score, summary, and exactly six checks. Each check must contain category, score, status (passed, attention, or failed), and findings.";
 
 async function getSettings() {
   const base = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;

@@ -1,4 +1,4 @@
--- Lead Ventures Agent Registry: empty production schema
+-- Lead Ventures Agents & Platform Repository: empty production schema
 create extension if not exists pgcrypto;
 create type public.app_role as enum ('admin','editor','viewer');
 create type public.workflow_status as enum ('draft','pending','approved','changes_requested','retired');
@@ -24,6 +24,18 @@ create table public.companies (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create table public.departments (
+  id uuid primary key default gen_random_uuid(), name text not null,
+  status text not null default 'active' check (status in ('active','inactive')),
+  created_by uuid references public.profiles(id), created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table public.categories (
+  id uuid primary key default gen_random_uuid(), name text not null,
+  status text not null default 'active' check (status in ('active','inactive')),
+  created_by uuid references public.profiles(id), created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+insert into public.categories(name) values
+('Customer Service'),('Marketing and Content'),('Sales and Lead Generation'),('Data and Analytics'),('Research'),('Process Automation'),('Finance'),('Human Resources'),('Compliance and Risk'),('Education and Student Support'),('Software Development'),('General Productivity');
 alter table public.profiles add column company_id uuid references public.companies(id) on delete set null;
 create table public.agents (
   id uuid primary key default gen_random_uuid(), name text not null, description text not null,
@@ -32,10 +44,37 @@ create table public.agents (
   status public.workflow_status not null default 'draft', risk_level public.risk_level not null default 'low',
   agent_scope text not null default 'individual' check (agent_scope in ('individual','team','enterprise')),
   category text, department text,
+  accountable_owner_id uuid references public.profiles(id) on delete set null,
+  access_scope text not null default 'admins_only' check(access_scope in ('owner_only','specific_people','admins_only','selected_companies','entire_team')),
+  access_permission text not null default 'view' check(access_permission in ('view','use','manage')),
+  access_effective_at timestamptz, access_expires_at timestamptz, access_notes text,
   uses_database boolean not null default false, uses_api boolean not null default false,
   uses_sensitive_data boolean not null default false, crosses_departments boolean not null default false,
   technical_review_required boolean not null default false, routing_notes text,
   governance_score integer check(governance_score between 0 and 100), created_by uuid not null references public.profiles(id),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table public.agent_user_access (
+  id uuid primary key default gen_random_uuid(), agent_id uuid not null references public.agents(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  permission_level text not null default 'view' check(permission_level in ('view','use','manage')),
+  effective_at timestamptz, expires_at timestamptz, granted_by uuid not null references public.profiles(id),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(), unique(agent_id,user_id),
+  check(expires_at is null or effective_at is null or expires_at >= effective_at)
+);
+create table public.agent_company_access (
+  id uuid primary key default gen_random_uuid(), agent_id uuid not null references public.agents(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  permission_level text not null default 'view' check(permission_level in ('view','use','manage')),
+  effective_at timestamptz, expires_at timestamptz, granted_by uuid not null references public.profiles(id),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(), unique(agent_id,company_id),
+  check(expires_at is null or effective_at is null or expires_at >= effective_at)
+);
+create table public.platform_details (
+  agent_id uuid primary key references public.agents(id) on delete cascade,
+  vendor text, license_type text, access_request_instructions text, support_contact text,
+  data_classification_restrictions text, approved_use_guidance text, prohibited_use_guidance text,
+  renewal_at timestamptz, notes text,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create table public.approval_assignments (
@@ -76,15 +115,25 @@ create function public.touch_updated_at() returns trigger language plpgsql as $$
 create trigger agents_updated before update on public.agents for each row execute procedure public.touch_updated_at();
 create trigger profiles_updated before update on public.profiles for each row execute procedure public.touch_updated_at();
 create trigger companies_updated before update on public.companies for each row execute procedure public.touch_updated_at();
+create trigger departments_updated before update on public.departments for each row execute procedure public.touch_updated_at();
+create trigger categories_updated before update on public.categories for each row execute procedure public.touch_updated_at();
 create function public.sync_agent_approval_status() returns trigger language plpgsql security definer set search_path=public as $$begin update agents set status=case when exists(select 1 from approval_assignments where agent_id=new.agent_id and required and status='changes_requested') then 'changes_requested'::workflow_status when exists(select 1 from approval_assignments where agent_id=new.agent_id and required and status<>'approved') then 'pending'::workflow_status when exists(select 1 from approval_assignments where agent_id=new.agent_id and required) then 'approved'::workflow_status else 'pending'::workflow_status end where id=new.agent_id;return new;end$$;
 create trigger sync_agent_approval_status after insert or update on public.approval_assignments for each row execute procedure public.sync_agent_approval_status();
 
-alter table public.profiles enable row level security;alter table public.companies enable row level security;alter table public.agents enable row level security;alter table public.approval_assignments enable row level security;alter table public.prompt_versions enable row level security;alter table public.governance_reviews enable row level security;alter table public.audit_log enable row level security;
+alter table public.profiles enable row level security;alter table public.companies enable row level security;alter table public.departments enable row level security;alter table public.categories enable row level security;alter table public.agents enable row level security;alter table public.agent_user_access enable row level security;alter table public.agent_company_access enable row level security;alter table public.platform_details enable row level security;alter table public.approval_assignments enable row level security;alter table public.prompt_versions enable row level security;alter table public.governance_reviews enable row level security;alter table public.audit_log enable row level security;
 create policy "authenticated read profiles" on public.profiles for select to authenticated using(true);
 create policy "admins update profiles" on public.profiles for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
 create policy "authenticated read companies" on public.companies for select to authenticated using(true);
 create policy "admins create companies" on public.companies for insert to authenticated with check(public.current_role()='admin' and created_by=auth.uid());
 create policy "admins update companies" on public.companies for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
+create policy "authenticated read departments" on public.departments for select to authenticated using(status='active' or public.current_role()='admin');
+create policy "admins create departments" on public.departments for insert to authenticated with check(public.current_role()='admin' and created_by=auth.uid());
+create policy "admins update departments" on public.departments for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
+create policy "authenticated read categories" on public.categories for select to authenticated using(status='active' or public.current_role()='admin');
+create policy "admins create categories" on public.categories for insert to authenticated with check(public.current_role()='admin' and created_by=auth.uid());
+create policy "admins update categories" on public.categories for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
+grant select,insert,update on public.departments to authenticated;
+grant select,insert,update on public.categories to authenticated;
 create policy "authenticated read agents" on public.agents for select to authenticated using(true);
 create policy "editors create agents" on public.agents for insert to authenticated with check(public.current_role() in ('admin','editor'));
 create policy "editors update agents" on public.agents for update to authenticated using(public.current_role() in ('admin','editor')) with check(public.current_role() in ('admin','editor'));
@@ -99,4 +148,4 @@ create policy "authenticated read governance" on public.governance_reviews for s
 create policy "editors create governance" on public.governance_reviews for insert to authenticated with check(public.current_role() in ('admin','editor') and reviewer_id=auth.uid());
 create policy "admins update governance" on public.governance_reviews for update to authenticated using(public.current_role()='admin') with check(public.current_role()='admin');
 create policy "authenticated read audit" on public.audit_log for select to authenticated using(true);
-create index profiles_company_idx on public.profiles(company_id);create index agents_company_idx on public.agents(company_id);create index agents_status_idx on public.agents(status);create index approval_agent_idx on public.approval_assignments(agent_id);create index approval_reviewer_idx on public.approval_assignments(reviewer_id,status);create index versions_agent_idx on public.prompt_versions(agent_id,version_number desc);create index versions_status_idx on public.prompt_versions(status);create index reviews_agent_idx on public.governance_reviews(agent_id);create index audit_created_idx on public.audit_log(created_at desc);
+create unique index departments_name_ci_idx on public.departments(lower(trim(name)));create unique index categories_name_ci_idx on public.categories(lower(trim(name)));create index departments_status_name_idx on public.departments(status,name);create index categories_status_name_idx on public.categories(status,name);create index profiles_company_idx on public.profiles(company_id);create index agents_company_idx on public.agents(company_id);create index agents_status_idx on public.agents(status);create index approval_agent_idx on public.approval_assignments(agent_id);create index approval_reviewer_idx on public.approval_assignments(reviewer_id,status);create index versions_agent_idx on public.prompt_versions(agent_id,version_number desc);create index versions_status_idx on public.prompt_versions(status);create index reviews_agent_idx on public.governance_reviews(agent_id);create index audit_created_idx on public.audit_log(created_at desc);

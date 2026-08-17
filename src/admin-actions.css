@@ -1,0 +1,276 @@
+.agent-actions {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.agent-actions button {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 6px 8px;
+  color: #555;
+}
+
+.agent-actions button.danger {
+  border-color: #e4b7aa;
+  color: #a43f24;
+  background: #fff6f3;
+}
+
+.pill.retired {
+  background: #eee;
+  color: #666;
+}
+
+.field-help {
+  display: block;
+  margin: 4px 0 7px;
+  color: #68716d;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.governance-inputs .field-help {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+}
+
+.taxonomy-grid {
+  margin: 0 42px 48px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.taxonomy-panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--orange);
+  padding: 20px;
+}
+
+.taxonomy-panel > header,
+.taxonomy-panel > form,
+.taxonomy-rows > div,
+.taxonomy-rows > div > span {
+  display: flex;
+  align-items: center;
+}
+
+.taxonomy-panel > header {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.taxonomy-panel h2 {
+  margin: 0;
+  font: 700 19px Georgia, serif;
+}
+
+.taxonomy-panel > header > span {
+  color: #68716d;
+  font-size: 12px;
+}
+
+.taxonomy-panel > form {
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.taxonomy-panel > form label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.taxonomy-panel input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  padding: 10px;
+}
+
+.taxonomy-panel button {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 9px 10px;
+  font-size: 12px;
+}
+
+.taxonomy-rows {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.taxonomy-rows > div {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 12px;
+}
+
+.taxonomy-rows > div > span {
+  gap: 7px;
+}
+
+/* Professional dashboard typography and a denser two-column registration form. */
+.shell > aside { width: auto; }
+.shell nav button { font-size: 13px; white-space: nowrap; }
+.pagehead h1 { font-size: 28px; }
+.pagehead p { font-size: 13px; line-height: 1.5; }
+.modal.compact {
+  width: min(760px, 100%);
+  max-width: 760px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.modal.compact header,
+.modal.compact footer,
+.modal.compact .full,
+.modal.compact .message { grid-column: 1 / -1; }
+.modal h2 { font-size: 21px; }
+.modal label,
+.auth label { font-size: 12px; }
+.modal input,
+.modal select,
+.modal textarea { font-size: 13px; }
+.table th { font-size: 10px; }
+.table td { font-size: 12px; }
+.primary,
+.modal footer button { font-size: 12px; }
+.dashboard-hero h1 { font-size: 34px; }
+.auth h1 { font-size: 44px; }
+.tour-card h2 { font-size: 22px; }
+
+@media (min-width: 901px) {
+  .shell { grid-template-columns: 270px 1fr; }
+}
+
+@media (max-width: 800px) {
+  .taxonomy-grid { grid-template-columns: 1fr; margin-left: 15px; margin-right: 15px; }
+}
+
+@media (max-width: 600px) {
+  .modal.compact { grid-template-columns: 1fr; }
+  .modal.compact > * { grid-column: 1; }
+  .taxonomy-panel > form { align-items: stretch; flex-wrap: wrap; }
+}
+
+.shell > aside { overflow-y: auto; }
+
+.access-management-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  border: 1px solid var(--line);
+  padding: 16px;
+}
+
+.platform-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  border: 1px solid var(--line);
+  padding: 16px;
+}
+
+.platform-fields > .full,
+.platform-fields > .field-help { grid-column: 1 / -1; }
+.platform-fields textarea { min-height: 86px; }
+
+.access-management-fields > .field-help,
+.access-management-fields > .full,
+.access-lock-note,
+.external-access-note {
+  grid-column: 1 / -1;
+}
+
+.access-management-fields textarea { min-height: 86px; }
+.access-management-fields select:disabled,
+.access-management-fields input:disabled,
+.access-management-fields textarea:disabled { background: #f1f1f1; color: #666; }
+
+.access-multi-select > select {
+  min-height: 130px;
+  margin-top: 7px;
+}
+
+.access-lock-note,
+.external-access-note,
+.external-access-banner {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.access-lock-note {
+  margin: 0;
+  padding: 10px;
+  background: #f7f5f2;
+  color: #5f6763;
+}
+
+.external-access-note,
+.external-access-banner {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 4px solid var(--orange);
+  background: #fff5f1;
+  color: #684a41;
+}
+
+.external-access-banner {
+  margin: 0 42px 16px;
+}
+
+.external-access-banner b { display: block; margin-bottom: 3px; }
+
+.resource-filters {
+  margin: 0 42px 18px;
+  display: grid;
+  grid-template-columns: minmax(240px, 2fr) repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.resource-filters label {
+  color: #606864;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resource-filters input,
+.resource-filters select {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 9px;
+  font-size: 12px;
+}
+
+.resource-table table,
+.access-table table { min-width: 1250px; }
+.open-resource { display: inline-block; white-space: nowrap; font-weight: 700; }
+.access-table button { border: 1px solid var(--line); background: #fff; padding: 7px 9px; white-space: nowrap; }
+.access-table .pill.scheduled { background: #eef1f8; color: #405a8b; }
+.access-table .pill.expired { background: #f7e7e3; color: #8f3523; }
+
+@media (max-width: 1000px) {
+  .resource-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resource-search { grid-column: 1 / -1; }
+}
+
+@media (max-width: 600px) {
+  .access-management-fields,
+  .platform-fields { grid-template-columns: 1fr; }
+  .access-management-fields > *,
+  .platform-fields > * { grid-column: 1; }
+  .resource-filters { margin-left: 15px; margin-right: 15px; grid-template-columns: 1fr; }
+  .resource-search { grid-column: 1; }
+  .external-access-banner { margin-left: 15px; margin-right: 15px; }
+}
