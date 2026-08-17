@@ -1,4 +1,4 @@
--- Personalized registry access for agents and skillsets.
+-- Personalized repository access for agents, skillsets, and platforms.
 -- Existing resources default to Admins Only and no records are deleted.
 
 alter table public.agents add column if not exists accountable_owner_id uuid references public.profiles(id) on delete set null;
@@ -196,9 +196,18 @@ drop policy if exists "editors create governance" on public.governance_reviews;
 create policy "managers create governance" on public.governance_reviews for insert to authenticated
 with check (public.can_manage_agent(agent_id) and reviewer_id = auth.uid());
 
-drop policy if exists "authenticated read approval assignments" on public.approval_assignments;
-create policy "authorized read approval assignments" on public.approval_assignments for select to authenticated
-using (public.can_access_agent(agent_id));
+-- approval_assignments belongs to the retired adaptive-approval workflow and is
+-- absent from installations that correctly skipped migrations 004 and 005.
+-- Apply its inherited visibility policy only on older installations that have it.
+do $$
+begin
+  if to_regclass('public.approval_assignments') is not null then
+    execute 'drop policy if exists "authenticated read approval assignments" on public.approval_assignments';
+    execute 'drop policy if exists "authorized read approval assignments" on public.approval_assignments';
+    execute 'create policy "authorized read approval assignments" on public.approval_assignments for select to authenticated using (public.can_access_agent(agent_id))';
+  end if;
+end
+$$;
 
 drop policy if exists "authenticated read audit" on public.audit_log;
 create policy "authorized read audit" on public.audit_log for select to authenticated
