@@ -277,7 +277,7 @@ function Registry({ session, profile }) {
         .from("prompt_versions")
         .select("*,agents(name,governance_flagged)")
         .order("created_at", { ascending: false }),
-      supabase.from("profiles").select("*,companies(name)").order("full_name"),
+      supabase.from("profiles").select("*").order("full_name"),
       supabase.from("companies").select("*").order("name"),
     ]);
     setAgents(a.data || []);
@@ -431,6 +431,7 @@ function Registry({ session, profile }) {
             rows={users}
             companies={companies}
             admin={admin}
+            session={session}
             reload={load}
           />
         )}
@@ -1602,8 +1603,36 @@ function CompanyForm({ user, close, saved }) {
     </div>
   );
 }
-function Users({ rows, companies, admin, reload }) {
-  const [message, setMessage] = useState("");
+function Users({ rows, companies, admin, session, reload }) {
+  const [message, setMessage] = useState(""),
+    [syncing, setSyncing] = useState(false),
+    [syncComplete, setSyncComplete] = useState(false);
+  async function syncUsers() {
+    setMessage("");
+    setSyncing(true);
+    try {
+      const response = await fetch("/api/sync-users", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to synchronize users.");
+      setMessage(
+        result.created
+          ? `${result.created} user ${result.created === 1 ? "profile" : "profiles"} added.`
+          : "User list is up to date.",
+      );
+      await reload();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSyncing(false);
+      setSyncComplete(true);
+    }
+  }
+  useEffect(() => {
+    if (admin && !syncComplete) syncUsers();
+  }, [admin, syncComplete]);
   async function update(id, changes) {
     setMessage("");
     const { error } = await supabase.from("profiles").update(changes).eq("id", id);
@@ -1626,10 +1655,17 @@ function Users({ rows, companies, admin, reload }) {
           title="Administrator access required"
           text="Only administrators can view and change user access."
         />
+      ) : syncing && rows.length === 0 ? (
+        <Loading />
       ) : rows.length === 0 ? (
         <Empty
           title="No team members found"
-          text="No access profiles are available. Run the user-profile synchronization migration, then refresh this page."
+          text="No access profiles are available. Try synchronizing authentication users again."
+          action={
+            <button className="primary" onClick={syncUsers} disabled={syncing}>
+              {syncing ? "Synchronizing…" : "Synchronize users"}
+            </button>
+          }
         />
       ) : (
         <div className="table">

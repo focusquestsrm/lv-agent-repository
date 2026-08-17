@@ -94,6 +94,8 @@ Migration 006 retires the pre-build authorization workflow from the live applica
 
 Migration 007 backfills `public.profiles` from existing Supabase Authentication users and repairs the signup trigger for future accounts. It also grants Admin access to Danielle, Sean (`sean@focusquest.com`), Eliana (`eliana@lead-ventures.com`), and Mariano (`mcarcamo@back2learn.com`). You can change any person between Admin, Editor, and Viewer from **Admin · Users & access**.
 
+The **Users & Access** page also reconciles Authentication users with access profiles whenever an administrator opens it. This server-side repair requires `SUPABASE_SERVICE_ROLE_KEY` in Netlify and preserves existing roles and company assignments.
+
 Migration 008 adds **Admin · AI Settings** and clears legacy low-risk pending prompts from the risk approval queue. In the application, choose Anthropic Claude, OpenAI (ChatGPT), or Google Gemini and enter the model name. Add the matching API key in Netlify environment variables; keys are never stored in Supabase or exposed to the browser.
 
 The sign-in screen also includes **Forgot your password?**. It sends a Supabase recovery email back to the application, where the user chooses and confirms a new password.
