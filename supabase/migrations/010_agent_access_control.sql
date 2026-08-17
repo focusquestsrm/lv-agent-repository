@@ -164,10 +164,12 @@ grant execute on function public.can_access_agent(uuid) to authenticated;
 grant execute on function public.can_manage_agent(uuid) to authenticated;
 
 drop policy if exists "authenticated read agents" on public.agents;
+drop policy if exists "authorized read agents" on public.agents;
 create policy "authorized read agents" on public.agents for select to authenticated
 using (public.can_access_agent(id));
 drop policy if exists "editors create agents" on public.agents;
 drop policy if exists "editors create agents and skillsets" on public.agents;
+drop policy if exists "authorized create agents and skillsets" on public.agents;
 create policy "authorized create agents and skillsets" on public.agents for insert to authenticated
 with check (
   (public.current_role() = 'admin' and created_by = auth.uid())
@@ -179,20 +181,25 @@ with check (
   )
 );
 drop policy if exists "editors update agents" on public.agents;
+drop policy if exists "managers update agents" on public.agents;
 create policy "managers update agents" on public.agents for update to authenticated
 using (public.can_manage_agent(id)) with check (public.can_manage_agent(id));
 
 drop policy if exists "authenticated read versions" on public.prompt_versions;
+drop policy if exists "authorized read versions" on public.prompt_versions;
 create policy "authorized read versions" on public.prompt_versions for select to authenticated
 using (public.can_access_agent(agent_id));
 drop policy if exists "editors create versions" on public.prompt_versions;
+drop policy if exists "managers create versions" on public.prompt_versions;
 create policy "managers create versions" on public.prompt_versions for insert to authenticated
 with check (public.can_manage_agent(agent_id) and created_by = auth.uid());
 
 drop policy if exists "authenticated read governance" on public.governance_reviews;
+drop policy if exists "authorized read governance" on public.governance_reviews;
 create policy "authorized read governance" on public.governance_reviews for select to authenticated
 using (public.can_access_agent(agent_id));
 drop policy if exists "editors create governance" on public.governance_reviews;
+drop policy if exists "managers create governance" on public.governance_reviews;
 create policy "managers create governance" on public.governance_reviews for insert to authenticated
 with check (public.can_manage_agent(agent_id) and reviewer_id = auth.uid());
 
@@ -210,6 +217,7 @@ end
 $$;
 
 drop policy if exists "authenticated read audit" on public.audit_log;
+drop policy if exists "authorized read audit" on public.audit_log;
 create policy "authorized read audit" on public.audit_log for select to authenticated
 using (public.current_role() = 'admin' or actor_id = auth.uid());
 
