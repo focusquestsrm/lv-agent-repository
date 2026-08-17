@@ -275,7 +275,7 @@ function Registry({ session, profile }) {
         .order("updated_at", { ascending: false }),
       supabase
         .from("prompt_versions")
-        .select("*,agents(name)")
+        .select("*,agents(name,governance_flagged)")
         .order("created_at", { ascending: false }),
       supabase.from("profiles").select("*,companies(name)").order("full_name"),
       supabase.from("companies").select("*").order("name"),
@@ -309,13 +309,14 @@ function Registry({ session, profile }) {
   }
   const nav = [
     ["dashboard", "▥", "Dashboard"],
-    ["agents", "▦", "Agents & skillsets"],
-    ["approvals", "✓", "Prompt approvals"],
-    ["governance", "◇", "AI governance"],
+    ["agents", "▦", "Agents & Skillsets"],
+    ["approvals", "✓", "Prompt Approvals"],
+    ["governance", "◇", "AI Governance"],
     ...(admin
       ? [
           ["companies", "◫", "Companies"],
-          ["users", "♙", "Admin · Users & access"],
+          ["users", "♙", "Admin · Users & Access"],
+          ["settings", "⚙", "Admin · AI Settings"],
         ]
       : []),
   ];
@@ -333,18 +334,14 @@ function Registry({ session, profile }) {
               {icon}
               <span>{label}</span>
               {id === "approvals" &&
-                versions.filter((v) => v.status === "pending").length > 0 && (
+                versions.filter((v) => v.status === "pending" && v.agents?.governance_flagged).length > 0 && (
                   <em>
-                    {versions.filter((v) => v.status === "pending").length}
+                    {versions.filter((v) => v.status === "pending" && v.agents?.governance_flagged).length}
                   </em>
                 )}
             </button>
           ))}
         </nav>
-        <div className="health">
-          <b>Governance monitoring</b>
-          <p>Create freely · Review only when risk is flagged</p>
-        </div>
         <div className="me">
           <i>{initials(profile.full_name || profile.email)}</i>
           <div>
@@ -361,11 +358,12 @@ function Registry({ session, profile }) {
               {
                 {
                   dashboard: "Dashboard",
-                  agents: "Agents & skillsets",
-                  approvals: "Prompt approvals",
-                  governance: "AI governance",
+                  agents: "Agents & Skillsets",
+                  approvals: "Prompt Approvals",
+                  governance: "AI Governance",
                   companies: "Companies",
-                  users: "Users & access",
+                  users: "Users & Access",
+                  settings: "AI Settings",
                 }[view]
               }
             </b>
@@ -436,6 +434,7 @@ function Registry({ session, profile }) {
             reload={load}
           />
         )}
+        {view === "settings" && <AISettings user={session.user} />}
       </section>
         {modal && (
           <AgentForm
@@ -610,7 +609,7 @@ function Agents({ rows, companies, busy, canEdit, open }) {
     <>
       <PageHead
         tag="TEAM INTELLIGENCE"
-        title="Agents & skillsets"
+        title="Agents & Skillsets"
         desc="A governed source of truth for the AI agents and reusable skillsets your team builds."
         action={
           canEdit && (
@@ -622,7 +621,7 @@ function Agents({ rows, companies, busy, canEdit, open }) {
       />
       <div className="filterbar">
         <label>
-          Agents by company
+          Agents by Company
           <select value={company} onChange={(e) => setCompany(e.target.value)}>
             <option value="all">All companies</option>
             {companies.map((c) => (
@@ -1391,12 +1390,12 @@ function AgentForm({ user, companies, close, saved }) {
   );
 }
 function Approvals({ rows, busy, admin, approve }) {
-  const pending = rows.filter((x) => x.status === "pending");
+  const pending = rows.filter((x) => x.status === "pending" && x.agents?.governance_flagged);
   return (
     <>
       <PageHead
         tag="CONTROLLED RELEASES"
-        title="Approval queue"
+        title="Prompt Approvals"
         desc="Review prompt changes before they become an active production version."
       />
       {busy ? (
@@ -1404,7 +1403,7 @@ function Approvals({ rows, busy, admin, approve }) {
       ) : pending.length === 0 ? (
         <Empty
           title="Approval queue is clear"
-          text="New and updated prompts submitted by editors will appear here."
+          text="Only prompts attached to a governance-flagged agent or skillset appear here."
         />
       ) : (
         <div className="cards">
@@ -1447,7 +1446,7 @@ function Governance({ agents }) {
     <>
       <PageHead
         tag="RESPONSIBLE AI"
-        title="AI governance"
+        title="AI Governance"
         desc="Automated screening across fairness, privacy, accuracy, safety, transparency, and security. Only meaningful risk is flagged."
       />
       {flagged.length === 0 ? (
@@ -1618,7 +1617,7 @@ function Users({ rows, companies, admin, reload }) {
     <>
       <PageHead
         tag="ADMINISTRATION"
-        title="Users & access"
+        title="Users & Access"
         desc="Admin-only controls for company assignment and Admin, Editor, or Viewer access."
       />
       {message && <div className="admin-message">{message}</div>}
@@ -1684,6 +1683,57 @@ function Users({ rows, companies, admin, reload }) {
           </table>
         </div>
       )}
+    </>
+  );
+}
+function AISettings({ user }) {
+  const defaults = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-4o-mini", gemini: "gemini-2.5-flash" };
+  const [provider, setProvider] = useState("anthropic");
+  const [model, setModel] = useState(defaults.anthropic);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    supabase.from("app_settings").select("setting_key,setting_value").then(({ data }) => {
+      const values = Object.fromEntries((data || []).map((x) => [x.setting_key, x.setting_value]));
+      const selected = values.governance_provider || "anthropic";
+      setProvider(selected);
+      setModel(values.governance_model || defaults[selected]);
+    });
+  }, []);
+  function choose(value) {
+    setProvider(value);
+    setModel(defaults[value]);
+  }
+  async function save(e) {
+    e.preventDefault();
+    setMessage("");
+    const { error } = await supabase.from("app_settings").upsert([
+      { setting_key: "governance_provider", setting_value: provider, updated_by: user.id, updated_at: new Date().toISOString() },
+      { setting_key: "governance_model", setting_value: model, updated_by: user.id, updated_at: new Date().toISOString() },
+    ]);
+    setMessage(error ? error.message : "AI governance provider saved.");
+  }
+  return (
+    <>
+      <PageHead tag="ADMINISTRATION" title="AI Settings" desc="Choose the server-side AI provider used to screen new agents and skillsets for governance risk." />
+      <form className="settings-panel" onSubmit={save}>
+        <label>Governance Provider
+          <select value={provider} onChange={(e) => choose(e.target.value)}>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="openai">OpenAI (ChatGPT)</option>
+            <option value="gemini">Google Gemini</option>
+          </select>
+        </label>
+        <label>Model
+          <input required value={model} onChange={(e) => setModel(e.target.value)} />
+        </label>
+        <div className="secret-note">
+          <b>API Key Location</b>
+          <p>Add the corresponding secret in Netlify → Project configuration → Environment variables: <code>{provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : "GEMINI_API_KEY"}</code>.</p>
+          <p>Keys are intentionally never entered or displayed in this application.</p>
+        </div>
+        {message && <div className="message">{message}</div>}
+        <button className="primary">Save AI Settings</button>
+      </form>
     </>
   );
 }
@@ -1795,6 +1845,12 @@ function Tour({ role, setView, close }) {
             eyebrow: "ADMIN VIEW",
             title: "Manage users and access",
             text: "Only Admins see the user-access area. Assign each person to a company and change their role to Admin, Editor, or Viewer.",
+          },
+          {
+            view: "settings",
+            eyebrow: "AI SETTINGS",
+            title: "Choose the governance provider",
+            text: "Select Anthropic Claude, OpenAI, or Google Gemini and its model. Add the matching secret API key in Netlify so it remains server-side.",
           },
         ]
       : []),

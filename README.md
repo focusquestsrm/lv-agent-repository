@@ -13,7 +13,8 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 - Required company selection during agent intake
 - Company assignment for users
 - Portfolio dashboard for agents, companies, owners, status, risk, and governance
-- Automated governance screening through a server-side Anthropic API call
+- Automated governance screening through a server-side AI provider call
+- Admin-selectable governance provider: Anthropic Claude, OpenAI, or Google Gemini
 - Risk-based escalation: only medium, high, or critical results are flagged
 - Per-user appearance choice: Dark or Light
 - Immutable prompt-version records
@@ -53,6 +54,8 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 ANTHROPIC_API_KEY=your_anthropic_api_key
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
+OPENAI_API_KEY=your_openai_api_key
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
 The service-role and Anthropic variables are server-only. Never prefix them with `VITE_`. When using plain `vite`, Netlify functions are unavailable; use Netlify local development to test invitations and governance screening.
@@ -68,6 +71,8 @@ The service-role and Anthropic variables are server-only. Never prefix them with
    - `SUPABASE_SERVICE_ROLE_KEY` — scope to Functions when your Netlify plan supports scopes
    - `ANTHROPIC_API_KEY` — server-only governance assessment key
    - `ANTHROPIC_MODEL` — optional model override
+   - `OPENAI_API_KEY` — required only when OpenAI is selected
+   - `GEMINI_API_KEY` — required only when Google Gemini is selected
 5. Deploy the site.
 6. Return to Supabase and add the final Netlify URL to Authentication redirect URLs.
 
@@ -81,12 +86,15 @@ If you already ran the original schema, run these migrations in order in the Sup
 2. `supabase/migrations/003_companies_dashboard.sql`
 3. `supabase/migrations/006_open_creation_governance_scan.sql`
 4. `supabase/migrations/007_sync_users_and_admins.sql`
+5. `supabase/migrations/008_ai_provider_settings.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing agents and users can then be assigned to the appropriate company. The Agents & skillsets page includes an **Agents by company** dropdown, including companies that do not yet have an agent.
 
 Migration 006 retires the pre-build authorization workflow from the live application. Existing request data remains in the database for audit history, but users create agents and skillsets directly. Each new entry must complete the governance API screening. Low-risk entries are cleared automatically; only medium, high, or critical results are flagged.
 
 Migration 007 backfills `public.profiles` from existing Supabase Authentication users and repairs the signup trigger for future accounts. It also grants Admin access to Danielle, Sean (`sean@focusquest.com`), Eliana (`eliana@lead-ventures.com`), and Mariano (`mcarcamo@back2learn.com`). You can change any person between Admin, Editor, and Viewer from **Admin · Users & access**.
+
+Migration 008 adds **Admin · AI Settings** and clears legacy low-risk pending prompts from the risk approval queue. In the application, choose Anthropic Claude, OpenAI (ChatGPT), or Google Gemini and enter the model name. Add the matching API key in Netlify environment variables; keys are never stored in Supabase or exposed to the browser.
 
 The sign-in screen also includes **Forgot your password?**. It sends a Supabase recovery email back to the application, where the user chooses and confirms a new password.
 
