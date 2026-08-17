@@ -20,8 +20,8 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 - Required company selection during agent intake
 - Company assignment for users
 - Portfolio dashboard for agents, skillsets, platforms, companies, departments, categories, access scopes, owners, renewals, risk, and governance
-- Automated governance screening through a server-side AI provider call
-- Admin-selectable governance provider: Anthropic Claude, OpenAI, or Google Gemini
+- Deterministic, versioned governance questionnaire with category-weighted scoring and mandatory risk overrides
+- Optional Admin-initiated AI advisory through Anthropic Claude, OpenAI, or Google Gemini; official scores and decisions never depend on AI
 - Risk-based escalation: only medium, high, or critical results are flagged
 - Per-user appearance choice: Dark or Light
 - Immutable prompt-version records
@@ -38,7 +38,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, `013`, and `014` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
+3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, `013`, `014`, and `015` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -76,7 +76,7 @@ The service-role and Anthropic variables are server-only. Never prefix them with
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY` — scope to Functions when your Netlify plan supports scopes
-   - `ANTHROPIC_API_KEY` — server-only governance assessment key
+   - `ANTHROPIC_API_KEY` — optional server-only AI advisory key
    - `ANTHROPIC_MODEL` — optional model override
    - `OPENAI_API_KEY` — required only when OpenAI is selected
    - `GEMINI_API_KEY` — required only when Google Gemini is selected
@@ -100,6 +100,7 @@ If you already ran the original schema, run these migrations in order in the Sup
 9. `supabase/migrations/012_agent_technical_fields.sql`
 10. `supabase/migrations/013_resource_insert_policy.sql`
 11. `supabase/migrations/014_governance_workflow_and_prompt_reviews.sql`
+12. `supabase/migrations/015_deterministic_governance_and_advisory.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing resources and users can then be assigned to the appropriate company. Company assignment supports organization and filtering; it does not restrict resource access unless an Admin explicitly chooses **Selected Companies**. The directory includes a company dropdown, including companies that do not yet have a resource.
 
@@ -123,7 +124,9 @@ Migration 013 corrects the resource-creation RLS policy. Admins and Editors may 
 
 Migration 014 introduces the durable governance workflow and auditable prompt-review decisions. It adds the `assessment_pending`, `cleared`, and `governance_review` workflow values without recreating the enum; backfills preserved governance results; keeps pending or flagged resources private from general audiences; creates `prompt_review_decisions`; corrects Admin prompt-version update policies; enforces two-person approval; and records approval/change-request decisions in the audit log. Run it once after migration 013 and never rerun `schema.sql` on an existing project.
 
-Resource submissions are saved before the configured AI assessment runs. Low-risk resources are cleared and published according to their access settings. Medium, high, and critical resources remain saved in the Admin governance queue until approval. If the assessment provider is unavailable, the resource remains saved as **Assessment Pending** and an Admin can retry from **AI Governance**.
+Migration 015 replaces provider-dependent submission screening with the official deterministic Governance Readiness Assessment. It preserves every assessment version, category score, answer and explanation, initial risk, final risk, mandatory override, clarification, Admin decision, optional AI advisory, and remediation item. It also adds owner-response and Admin-only decision policies. Run it once after migration 014; do not rerun `schema.sql`.
+
+Resource submissions are always saved. The browser calculates the versioned assessment from structured answers, and the database records it atomically with the current official result. Scores of 85–100 clear automatically; 65–84 are medium, 40–64 high, and 0–39 critical. Medium, high, critical, incomplete, and manually flagged resources enter the Admin governance queue. Mandatory overrides can raise final risk but never lower it. Missing information produces **Assessment Pending** rather than a failed save.
 
 Repository access controls visibility of resource records, prompts, URLs, platform details, and governance information. Availability in this repository does not automatically create a license or user account in an external platform. Follow the listed access instructions or contact the designated administrator.
 
@@ -147,7 +150,7 @@ For security, disable open sign-ups in Supabase after the first administrator is
 
 ## Guided tour
 
-The tour opens automatically the first time a person enters the repository. It explains Agents, Skillsets, Platforms, the directory as the governed source of truth, personalized resources, suggested names, accountable ownership, field-level guidance, managed classifications, access scope, external-license separation, automated governance screening, risk-based review, and role-specific controls. Administrators also see company, classification, user, and resource-access guidance. Completion is stored only in that browser. Users can restart it from **Take a tour**.
+The tour opens automatically the first time a person enters the repository. It explains Agents, Skillsets, Platforms, the directory as the governed source of truth, personalized resources, deterministic governance scoring and overrides, optional advisory AI, accountable ownership, access scope, clarification and remediation, and role-specific controls. Completion is stored only in that browser. Users can restart it from **Take a tour**.
 
 Each user can choose **Dark** or **Light** from the Appearance menu. The preference is stored only in that browser and does not affect other users. Dark remains the default.
 
@@ -161,6 +164,8 @@ Each user can choose **Dark** or **Light** from the Appearance menu. The prefere
 - Keep Supabase and Netlify secrets out of source control.
 - Review roles quarterly and remove inactive accounts promptly.
 
-## Governance API behavior
+## Governance and optional AI advisory behavior
 
-The governance function evaluates fairness, privacy, accuracy, safety, transparency, and security. Creation fails closed if the assessment service is unavailable, so an unchecked entry is not silently added. Keep the Anthropic API key in Netlify Functions only and never expose it through a `VITE_` variable.
+The official assessment evaluates Privacy & Data, Security, Safety & Oversight, Fairness & Bias, Accuracy & Grounding, and Transparency without calling an external provider. The same responses and assessment version always produce the same base score. Explicit mandatory overrides determine the final risk and are stored separately for auditability.
+
+Only an active Admin can click **Run AI-Assisted Assessment** for a flagged resource. The server sends sanitized repository metadata and deterministic evidence to the configured provider, validates the structured response, and stores an immutable advisory plus editable remediation tasks. It never updates the official score, final risk, publication status, or access. With no matching server-side API key, the button is disabled and the application displays: “AI-assisted assessment is not configured. The deterministic governance assessment remains available.” Never expose provider keys through a `VITE_` variable.

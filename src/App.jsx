@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase, configured } from "./supabase";
+import { ASSESSMENT_VERSION, GOVERNANCE_CATEGORIES, OVERRIDE_QUESTIONS, RESPONSE_OPTIONS, evaluateGovernance, initialQuestionnaire } from "./governance";
 const checks = [
   "Fairness & bias",
   "Privacy & data",
@@ -259,6 +260,10 @@ function Registry({ session, profile }) {
     [userAccess, setUserAccess] = useState([]),
     [companyAccess, setCompanyAccess] = useState([]),
     [accessAudit, setAccessAudit] = useState([]),
+    [assessments, setAssessments] = useState([]),
+    [clarifications, setClarifications] = useState([]),
+    [advisories, setAdvisories] = useState([]),
+    [recommendations, setRecommendations] = useState([]),
     [busy, setBusy] = useState(true),
     [modal, setModal] = useState(false),
     [editingAgent, setEditingAgent] = useState(null),
@@ -278,7 +283,7 @@ function Registry({ session, profile }) {
   const adminViews = ["users", "companies", "taxonomy", "access", "settings"];
   async function load() {
     setBusy(true);
-    const [a, v, u, c, d, cat, ua, ca, audit, pd] = await Promise.all([
+    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr] = await Promise.all([
       supabase
         .from("agents")
         .select("*,companies(name)")
@@ -300,6 +305,10 @@ function Registry({ session, profile }) {
         .order("created_at", { ascending: false })
         .limit(200),
       supabase.from("platform_details").select("*"),
+      supabase.from("governance_assessments").select("*").order("assessed_at", { ascending: false }),
+      supabase.from("governance_clarifications").select("*").order("created_at", { ascending: false }),
+      supabase.from("ai_advisory_assessments").select("*").order("created_at", { ascending: false }),
+      supabase.from("governance_recommendations").select("*").order("created_at", { ascending: false }),
     ]);
     const details = pd.data || [];
     setAgents(
@@ -317,6 +326,10 @@ function Registry({ session, profile }) {
     setUserAccess(ua.data || []);
     setCompanyAccess(ca.data || []);
     setAccessAudit(audit.data || []);
+    setAssessments(ga.data || []);
+    setClarifications(gc.data || []);
+    setAdvisories(aa.data || []);
+    setRecommendations(gr.data || []);
     setBusy(false);
   }
   useEffect(() => {
@@ -584,7 +597,7 @@ function Registry({ session, profile }) {
             approve={approvePrompt}
           />
         )}{" "}
-        {view === "governance" && <Governance agents={agents} admin={admin} review={() => setView("approvals")} retry={retryAssessment} />}{" "}
+        {view === "governance" && <Governance agents={agents} assessments={assessments} clarifications={clarifications} advisories={advisories} recommendations={recommendations} admin={admin} user={session.user} token={session.access_token} reload={load} notify={setToast} />}{" "}
         {admin && view === "companies" && (
           <Companies
             rows={companies}
@@ -660,6 +673,7 @@ function Registry({ session, profile }) {
             )}
             admin={admin}
             agent={editingAgent}
+            assessment={assessments.find((item) => item.agent_id === editingAgent?.id)}
             prompt={
               editingAgent
                 ? versions.find((version) => version.agent_id === editingAgent.id)
@@ -1773,6 +1787,7 @@ function AgentForm({
   companyAccess,
   admin,
   agent,
+  assessment,
   prompt,
   close,
   saved,
@@ -1836,9 +1851,13 @@ function AgentForm({
     ),
     [authorizedCompanies, setAuthorizedCompanies] = useState(
       companyAccess.map((assignment) => assignment.company_id),
-    );
+    ),
+    [questionnaire, setQuestionnaire] = useState(() => initialQuestionnaire(assessment?.responses || {}));
   function set(k, v) {
     setForm((current) => ({ ...current, [k]: v }));
+  }
+  function answerQuestion(id, field, value) {
+    setQuestionnaire((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
   }
   useEffect(() => {
     if (nameEdited) return;
@@ -1851,6 +1870,12 @@ function AgentForm({
     const ownerName = form.owner_name === "Other" ? customOwner.trim() : form.owner_name.trim();
     if (!ownerName) return setError("Select or enter an accountable owner.");
     const submission = { ...form, owner_name: ownerName };
+    const deterministic = evaluateGovernance(questionnaire, {
+      uses_sensitive_data: form.uses_sensitive_data,
+      uses_database: form.uses_database,
+      uses_api: form.uses_api,
+      accountable_owner_id: form.accountable_owner_id || (!admin ? user.id : null),
+    });
     setChecking(true);
     function saveFailure(stage, technicalError) {
       console.error(`Resource ${stage} failed`, technicalError);
@@ -1898,14 +1923,14 @@ function AgentForm({
       uses_api: form.uses_api,
       uses_sensitive_data: form.uses_sensitive_data,
       crosses_departments: form.crosses_departments,
-      risk_level: agent?.risk_level || "low",
-      governance_score: null,
-      governance_flagged: false,
-      governance_summary: "Governance assessment pending.",
-      governance_checked_at: null,
-      governance_provider: null,
-      governance_status: "assessment_pending",
-      status: agent?.status === "retired" ? "retired" : "assessment_pending",
+      risk_level: deterministic.final_risk,
+      governance_score: deterministic.overall_score,
+      governance_flagged: deterministic.flagged,
+      governance_summary: deterministic.summary,
+      governance_checked_at: new Date().toISOString(),
+      governance_provider: "Deterministic LV Governance",
+      governance_status: deterministic.status,
+      status: agent?.status === "retired" ? "retired" : deterministic.status === "cleared" ? "approved" : deterministic.status,
       ...accessValues,
     };
     const data = { id: agent?.id || crypto.randomUUID() };
@@ -1969,8 +1994,8 @@ function AgentForm({
         version_number: versionNumber,
         prompt_text: form.prompt,
         change_explanation: agent
-          ? "Resource details saved and queued for AI governance."
-          : "Initial prompt saved and queued for AI governance.",
+          ? "Resource details saved and deterministically reassessed."
+          : "Initial prompt saved with its deterministic governance assessment.",
         status: "pending",
         created_by: user.id,
       });
@@ -2024,57 +2049,23 @@ function AgentForm({
         }
       }
     }
-    let assessment;
-    try {
-      const response = await fetch("/api/governance-check", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(submission),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Governance check failed.");
-      assessment = result;
-    } catch (assessmentError) {
-      console.error("Governance assessment unavailable", assessmentError);
-      setChecking(false);
-      saved("Resource saved. Governance assessment is pending; an Admin can retry it from AI Governance.");
-      return;
-    }
-    const { error: assessmentSaveError } = await supabase
-      .from("agents")
-      .update({
-        risk_level: assessment.risk_level,
-        governance_score: assessment.governance_score,
-        governance_flagged: assessment.flagged,
-        governance_summary: assessment.summary,
-        governance_checked_at: new Date().toISOString(),
-        governance_provider: assessment.provider,
-        governance_status: assessment.flagged ? "governance_review" : "cleared",
-        status: agent?.status === "retired" ? "retired" : assessment.flagged ? "governance_review" : "approved",
-      })
-      .eq("id", data.id);
-    if (assessmentSaveError) {
-      console.error("Governance result persistence failed", assessmentSaveError);
-      setChecking(false);
-      saved("Resource saved. Its assessment result still needs Admin attention.");
-      return;
-    }
-    if (!assessment.flagged)
-      await supabase.from("prompt_versions").update({ status: "approved" }).eq("id", version.id);
-    if (assessment.checks?.length)
-      await supabase.from("governance_reviews").insert(
-        assessment.checks.map((check) => ({
-          agent_id: data.id,
-          prompt_version_id: version.id,
-          category: check.category,
-          score: check.score,
-          status: check.status,
-          findings: check.findings,
-          reviewer_id: user.id,
-        })),
-      );
+    const { error: assessmentSaveError } = await supabase.rpc("record_governance_assessment", {
+      target_agent: data.id,
+      target_prompt_version: version.id,
+      target_version: ASSESSMENT_VERSION,
+      target_score: deterministic.overall_score,
+      target_categories: deterministic.category_scores,
+      target_responses: questionnaire,
+      target_initial_risk: deterministic.initial_risk,
+      target_final_risk: deterministic.final_risk,
+      target_overrides: deterministic.overrides,
+      target_missing: deterministic.missing,
+      target_status: deterministic.status,
+      target_summary: deterministic.summary,
+    });
+    if (assessmentSaveError) return savedWithAttention("deterministic assessment", assessmentSaveError);
     setChecking(false);
-    saved(assessment.flagged ? "Resource saved and routed for Admin governance review." : "Resource saved, cleared, and published.");
+    saved(deterministic.status === "cleared" ? "Resource saved, deterministically assessed, cleared, and published." : deterministic.status === "assessment_pending" ? "Resource saved. Complete the missing governance information before publication." : "Resource saved and routed for Admin governance review.");
   }
   return (
     <div className="backdrop">
@@ -2343,6 +2334,25 @@ function AgentForm({
             </label>
           ))}
         </fieldset>
+        <fieldset className="full governance-questionnaire">
+          <legend>Governance readiness questionnaire</legend>
+          <p className="field-help">This versioned questionnaire produces the official deterministic score. Yes = 100, No = 0, Unknown = 25, and Not Applicable is excluded only when justified.</p>
+          {GOVERNANCE_CATEGORIES.map((category) => (
+            <section key={category.id}>
+              <header><h3>{category.label}</h3><span>{category.weight}% weight</span></header>
+              {category.questions.map(([id, label, highImpact]) => (
+                <QuestionnaireField key={id} id={id} label={label} highImpact={highImpact} value={questionnaire[id]} change={answerQuestion} />
+              ))}
+            </section>
+          ))}
+          <section>
+            <header><h3>Mandatory risk indicators</h3><span>Overrides</span></header>
+            {OVERRIDE_QUESTIONS.map(([id, label]) => (
+              <QuestionnaireField key={id} id={id} label={label} value={questionnaire[id]} change={answerQuestion} />
+            ))}
+          </section>
+          <p className="questionnaire-note">Incomplete answers never prevent saving. They route the resource to Assessment Pending until the owner supplies enough information.</p>
+        </fieldset>
         <fieldset className="full access-management-fields">
           <legend>Access Management</legend>
           <p className="field-help">
@@ -2527,7 +2537,100 @@ function ApprovalCard({ version, admin, approve }) {
     </article>
   );
 }
-function Governance({ agents, admin, review, retry }) {
+function QuestionnaireField({ id, label, highImpact, value = {}, change }) {
+  const explanationRequired = value.answer === "Not Applicable" || (highImpact && ["No", "Unknown"].includes(value.answer));
+  return (
+    <div className="questionnaire-row">
+      <label>{label}{highImpact && <b>High impact</b>}
+        <select value={value.answer || ""} onChange={(e) => change(id, "answer", e.target.value)}>
+          <option value="">Select response</option>
+          {RESPONSE_OPTIONS.map((option) => <option key={option}>{option}</option>)}
+        </select>
+      </label>
+      {(explanationRequired || value.explanation) && (
+        <label>Explanation {explanationRequired && <span>(required)</span>}
+          <textarea required={explanationRequired} value={value.explanation || ""} onChange={(e) => change(id, "explanation", e.target.value)} placeholder="Provide evidence, context, or the reason this does not apply." />
+        </label>
+      )}
+    </div>
+  );
+}
+function Governance({ agents, assessments, clarifications, advisories, recommendations, admin, user, token, reload, notify }) {
+  const [ai, setAi] = useState({ loading: true, configured: false });
+  useEffect(() => {
+    if (!admin) return;
+    fetch("/api/ai-advisory", { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => ({ ok: response.ok, ...(await response.json()) }))
+      .then((result) => setAi({ loading: false, ...result, configured: result.ok && result.configured }))
+      .catch(() => setAi({ loading: false, configured: false }));
+  }, [admin, token]);
+  const latest = assessments.filter((item, index, all) => all.findIndex((candidate) => candidate.agent_id === item.agent_id) === index);
+  const queue = agents.filter((agent) => {
+    const item = latest.find((candidate) => candidate.agent_id === agent.id);
+    return agent.manual_governance_flag || ["medium", "high", "critical"].includes(item?.final_risk) || ["assessment_pending", "governance_review", "clarification_requested", "changes_requested"].includes(item?.review_status || agent.governance_status);
+  });
+  return <>
+    <PageHead tag="RESPONSIBLE AI" title="AI Governance" desc="Deterministic readiness scoring, mandatory overrides, Admin review, clarification, and advisory remediation. AI never changes the official result." />
+    {admin && !ai.loading && !ai.configured && <div className="admin-message">AI-assisted assessment is not configured. The deterministic governance assessment remains available.</div>}
+    {queue.length === 0 ? <Empty title="Governance queue is clear" text="No medium, high, critical, pending, or manually flagged resources currently require review." /> : <div className="governance-flags">{queue.map((agent) => <GovernanceCard key={agent.id} agent={agent} assessment={latest.find((item) => item.agent_id === agent.id)} history={assessments.filter((item) => item.agent_id === agent.id)} clarifications={clarifications.filter((item) => item.agent_id === agent.id)} advisories={advisories.filter((item) => item.agent_id === agent.id)} recommendations={recommendations.filter((item) => item.agent_id === agent.id)} admin={admin} user={user} token={token} ai={ai} reload={reload} notify={notify} />)}</div>}
+    <section className="standard"><h2>Lead Ventures Resource Standard</h2><div>{["Clear approved purpose","Named accountable owner","Human review for high-impact decisions","Grounded outputs and uncertainty labels","Representative bias evaluation","Data minimization and retention rules","Failure, escalation, and rollback plan","Quarterly access review"].map((item) => <span key={item}>✓ {item}</span>)}</div></section>
+  </>;
+}
+function GovernanceCard({ agent, assessment, history, clarifications, advisories, recommendations, admin, user, token, ai, reload, notify }) {
+  const [form, setForm] = useState({ notes: "", conditions: "", clarification: "", deadline: "" });
+  const [selectedQuestions, setSelectedQuestions] = useState(() => (assessment?.missing_information || []).map((item) => item.replace(":explanation", "")));
+  const [busy, setBusy] = useState(false);
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  async function decide(decision) {
+    if (!assessment) return notify("Complete the deterministic assessment before recording a decision.");
+    setBusy(true);
+    const { error } = await supabase.rpc("decide_governance_assessment", { target_assessment: assessment.id, target_decision: decision, decision_notes: form.notes || null, decision_conditions: form.conditions || null });
+    setBusy(false);
+    if (error) return notify(error.message.includes("own resource") ? "Resource authors cannot approve their own resource. A different Admin must record approval." : error.message);
+    notify("Governance decision recorded in the audit history."); await reload();
+  }
+  async function requestClarification() {
+    if (!assessment || !form.clarification.trim() || selectedQuestions.length === 0) return notify("Select at least one question and add clarification instructions.");
+    setBusy(true);
+    const { error } = await supabase.from("governance_clarifications").insert({ assessment_id: assessment.id, agent_id: agent.id, requested_by: user.id, question_ids: [...new Set(selectedQuestions)], instructions: form.clarification.trim(), due_at: form.deadline ? `${form.deadline}T23:59:59.999Z` : null });
+    setBusy(false);
+    if (error) return notify(error.message);
+    notify("Clarification request sent to the accountable owner."); await reload();
+  }
+  async function runAI() {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/ai-advisory", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ assessmentId: assessment?.id }) });
+      const result = await response.json(); if (!response.ok) throw new Error(result.error);
+      notify("AI advisory saved. The official score, risk, and publication status were not changed."); await reload();
+    } catch (error) { notify(error.message); } finally { setBusy(false); }
+  }
+  return <article>
+    <header><div><small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned company"} · assessment v{assessment?.assessment_number || "—"}</small><h2>{agent.name}</h2></div><span className="risk-flag">⚑ {assessment?.final_risk || "pending"} risk</span></header>
+    <dl><div><dt>Accountable owner</dt><dd>{agent.owner_name || "Unassigned"}</dd></div><div><dt>Official score</dt><dd>{assessment?.overall_score ?? "—"}%</dd></div><div><dt>Initial / final risk</dt><dd>{assessment ? `${assessment.initial_risk} / ${assessment.final_risk}` : "Pending"}</dd></div><div><dt>Assessment</dt><dd>{assessment?.assessment_version || "Not completed"}</dd></div><div><dt>Review status</dt><dd><Pill text={assessment?.review_status || agent.governance_status} /></dd></div><div><dt>Date assessed</dt><dd>{assessment?.assessed_at ? new Date(assessment.assessed_at).toLocaleDateString() : "Pending"}</dd></div></dl>
+    {assessment && <><section><h3>Category scores</h3><div className="category-score-grid">{GOVERNANCE_CATEGORIES.map((category) => <span key={category.id}><b>{category.label}</b>{assessment.category_scores?.[category.id] ?? "—"}%</span>)}</div></section><section><h3>Mandatory overrides</h3>{assessment.mandatory_overrides?.length ? <ul>{assessment.mandatory_overrides.map((item) => <li key={item.id}><b>{item.minimum_risk}</b> · {item.reason}</li>)}</ul> : <p>No mandatory overrides applied.</p>}</section></>}
+    {clarifications.length > 0 && <details><summary>Clarification history ({clarifications.length})</summary>{clarifications.map((item) => <div className="history-item" key={item.id}><b>{item.status}</b><p>{item.instructions}</p>{item.owner_response && <p><strong>Owner:</strong> {item.owner_response}</p>}<small>{new Date(item.created_at).toLocaleString()}</small></div>)}</details>}
+    {advisories.length > 0 && <details open><summary>AI advisory history ({advisories.length})</summary>{advisories.map((item) => <Advisory key={item.id} item={item} recommendations={recommendations.filter((recommendation) => recommendation.advisory_id === item.id)} admin={admin} reload={reload} notify={notify} />)}</details>}
+    {history.length > 1 && <details><summary>Assessment history ({history.length})</summary>{history.map((item) => <div className="history-item" key={item.id}>v{item.assessment_number} · {item.overall_score}% · {item.final_risk} · {new Date(item.assessed_at).toLocaleString()}</div>)}</details>}
+    {admin ? <div className="governance-actions"><label>Admin notes<textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} /></label><label>Approval conditions<textarea value={form.conditions} onChange={(e) => set("conditions", e.target.value)} /></label><div className="clarification-question-picker"><b>Questions requiring clarification</b>{GOVERNANCE_CATEGORIES.flatMap((category) => category.questions).map(([id, label]) => <label key={id}><input type="checkbox" checked={selectedQuestions.includes(id)} onChange={(e) => setSelectedQuestions((current) => e.target.checked ? [...current, id] : current.filter((item) => item !== id))}/>{label}</label>)}</div><label>Clarification instructions<textarea value={form.clarification} onChange={(e) => set("clarification", e.target.value)} /></label><label>Response deadline<input type="date" value={form.deadline} onChange={(e) => set("deadline", e.target.value)} /></label><div><button disabled={busy} onClick={requestClarification}>Request Clarification</button><button disabled={busy || !ai.configured || !assessment} onClick={runAI}>Run AI-Assisted Assessment</button><button disabled={busy} onClick={() => decide("request_changes")}>Request Changes</button><button disabled={busy} onClick={() => decide("rejected")}>Reject</button><button disabled={busy} onClick={() => decide("accepted_residual_risk")}>Accept Residual Risk</button><button disabled={busy} onClick={() => decide("approved_with_conditions")}>Approve With Conditions</button><button className="primary" disabled={busy} onClick={() => decide("approved")}>Approve</button></div>{!ai.loading && !ai.configured && <p className="field-help">AI-assisted assessment is not configured. The deterministic governance assessment remains available.</p>}</div> : clarifications.filter((item) => item.status === "open").map((item) => <OwnerClarification key={item.id} item={item} user={user} reload={reload} notify={notify} />)}
+  </article>;
+}
+function OwnerClarification({ item, user, reload, notify }) {
+  const [response, setResponse] = useState("");
+  async function send() { const { error } = await supabase.rpc("respond_governance_clarification", { target_clarification: item.id, target_response: response }); if (error) return notify(error.message); notify("Clarification response sent."); await reload(); }
+  return <div className="clarification-response"><b>{item.instructions}</b>{item.due_at && <small>Due {new Date(item.due_at).toLocaleDateString()}</small>}<textarea value={response} onChange={(e) => setResponse(e.target.value)} placeholder="Provide evidence and context."/><button className="primary" onClick={send}>Send response</button></div>;
+}
+function Advisory({ item, recommendations, admin, reload, notify }) {
+  const comparison = item.output?.comparison;
+  return <div className="advisory-view"><div className="advisory-guardrail">AI-generated recommendations are advisory and require review by an authorized Admin. They do not constitute legal, regulatory, privacy, security, or compliance certification.</div><h3>{item.executive_summary}</h3><p><b>Advisory score:</b> {item.advisory_score ?? "—"}% · <b>Advisory risk:</b> {item.advisory_risk || "—"} · <b>Residual risk:</b> {item.output?.residual_risk || "—"} · <b>Recommended decision:</b> {item.recommended_decision || "—"}</p>{["concerns","evidence","missing_information","clarification_questions"].map((key) => item.output?.[key]?.length ? <section key={key}><h4>{key.replaceAll("_", " ")}</h4><ul>{item.output[key].map((value, index) => <li key={`${key}-${index}`}>{typeof value === "string" ? value : JSON.stringify(value)}</li>)}</ul></section> : null)}{comparison && <><h4>Reassessment comparison</h4><div className="category-score-grid">{["resolved","reduced","unchanged","new"].map((key) => <span key={key}><b>{key}</b>{comparison[key]?.length || 0}</span>)}</div></>}{recommendations.map((recommendation) => <Remediation key={recommendation.id} item={recommendation} admin={admin} reload={reload} notify={notify} />)}</div>;
+}
+function Remediation({ item, admin, reload, notify }) {
+  const [form, setForm] = useState({ owner_decision: item.owner_decision || "", owner_response: item.owner_response || "", action_owner: item.action_owner || "", target_date: item.target_date || "", status: item.status, evidence: item.evidence || "", admin_notes: item.admin_notes || "" });
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  async function save(verify = false) { const { error } = await supabase.rpc("update_governance_recommendation", { target_recommendation: item.id, target_owner_decision: form.owner_decision || null, target_owner_response: form.owner_response || null, target_action_owner: form.action_owner || null, target_due_date: form.target_date || null, target_status: form.status, target_evidence: form.evidence || null, target_admin_notes: admin ? form.admin_notes || null : null, target_verify: Boolean(admin && verify) }); if (error) return notify(error.message); notify(verify ? "Recommendation verified and closed by Admin." : "Remediation item updated."); await reload(); }
+  return <div className="recommendation"><header><b>{item.priority}</b><span>{item.category} · {item.plan_phase}</span></header><h4>{item.concern}</h4><p>{item.recommended_action}</p><small>{item.impact} · Evidence: {item.evidence_required || "Not specified"} · Expected improvement: {item.expected_score_improvement || 0} points</small><div><select value={form.owner_decision} onChange={(e) => set("owner_decision", e.target.value)}><option value="">Accept or dispute</option><option value="accepted">Accept</option><option value="disputed">Dispute</option></select><select value={form.status} onChange={(e) => set("status", e.target.value)}>{["Not Started","In Progress","Completed","Accepted Risk","Not Applicable","Awaiting Verification"].map((status) => <option key={status}>{status}</option>)}</select><input value={form.action_owner} onChange={(e) => set("action_owner", e.target.value)} placeholder="Action owner"/><input type="date" value={form.target_date} onChange={(e) => set("target_date", e.target.value)}/><textarea value={form.owner_response} onChange={(e) => set("owner_response", e.target.value)} placeholder="Owner response"/><textarea value={form.evidence} onChange={(e) => set("evidence", e.target.value)} placeholder="Evidence or link"/>{admin && <textarea value={form.admin_notes} onChange={(e) => set("admin_notes", e.target.value)} placeholder="Admin verification or residual-risk note"/>}<button onClick={() => save(false)}>Save remediation</button>{admin && <button className="primary" onClick={() => save(true)}>Verify & close</button>}</div></div>;
+}
+function LegacyGovernance({ agents, admin, review, retry }) {
   const flagged = agents.filter((agent) => agent.governance_flagged);
   const pending = agents.filter((agent) => agent.governance_status === "assessment_pending");
   return (
@@ -3070,11 +3173,11 @@ function AISettings({ user }) {
       { setting_key: "governance_provider", setting_value: provider, updated_by: user.id, updated_at: new Date().toISOString() },
       { setting_key: "governance_model", setting_value: model, updated_by: user.id, updated_at: new Date().toISOString() },
     ]);
-    setMessage(error ? error.message : "AI governance provider saved.");
+    setMessage(error ? error.message : "Optional AI advisory provider saved.");
   }
   return (
     <>
-      <PageHead tag="ADMINISTRATION" title="AI Settings" desc="Choose the server-side AI provider used to screen new resources for governance risk." />
+      <PageHead tag="ADMINISTRATION" title="AI Settings" desc="Optionally configure the provider used only when an Admin requests an advisory assessment. Deterministic governance always remains available." />
       <form className="settings-panel" onSubmit={save}>
         <label>Governance Provider
           <select value={provider} onChange={(e) => choose(e.target.value)}>
@@ -3089,7 +3192,7 @@ function AISettings({ user }) {
         <div className="secret-note">
           <b>API Key Location</b>
           <p>Add the corresponding secret in Netlify → Project configuration → Environment variables: <code>{provider === "anthropic" ? "ANTHROPIC_API_KEY" : provider === "openai" ? "OPENAI_API_KEY" : "GEMINI_API_KEY"}</code>.</p>
-          <p>Keys are intentionally never entered or displayed in this application.</p>
+          <p>Keys are intentionally never entered or displayed in this application. Official scoring, overrides, routing, and review remain available without one.</p>
         </div>
         {message && <div className="message">{message}</div>}
         <button className="primary">Save AI Settings</button>
@@ -3194,15 +3297,15 @@ function Tour({ role, setView, close }) {
     },
     {
       view: "governance",
-      eyebrow: "AUTOMATED GOVERNANCE",
-      title: "Screen every new entry",
-      text: "Resources are saved before assessment. Medium, high, or critical risk appears in AI Governance for Admin attention; temporary provider failures remain saved and can be retried.",
+      eyebrow: "DETERMINISTIC GOVERNANCE",
+      title: "Score every resource consistently",
+      text: "Resources are always saved. Structured answers produce category-weighted scores and mandatory risk overrides without an AI provider. Medium, high, critical, and incomplete assessments enter the Admin queue.",
     },
     {
       view: "approvals",
       eyebrow: "RISK-BASED REVIEW",
       title: "Review only what needs attention",
-      text: "Low-risk entries are cleared automatically. Flagged entries and later material prompt changes appear for Admin review.",
+      text: "Low-risk entries clear automatically. Admins can request clarification, approve with conditions, request changes, reject, or optionally run an AI advisory with tracked remediation. AI never changes the official result.",
     },
     ...(role === "admin"
       ? [

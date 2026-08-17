@@ -40,7 +40,9 @@ export default async function reviewPrompt(request) {
     return Response.json(
       {
         error:
-          "We could not record this review decision. Please confirm that you have Admin approval access and try again.",
+          error?.message?.includes("cannot approve their own")
+            ? "Prompt authors cannot approve their own prompt. A different Admin must approve and publish it."
+            : "We could not record this review decision. Please confirm that you have Admin approval access and try again.",
       },
       { status: 403 },
     );

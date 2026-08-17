@@ -352,3 +352,15 @@
   .resource-search { grid-column: 1; }
   .external-access-banner { margin-left: 15px; margin-right: 15px; }
 }
+
+.clarification-question-picker {
+  grid-column: 1 / -1;
+  display: grid !important;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px !important;
+  background: #fff;
+  padding: 10px;
+}
+.clarification-question-picker > b { grid-column: 1 / -1; font-size: 8px; }
+.clarification-question-picker label { display: flex; gap: 6px; align-items: flex-start; font-size: 8px; }
+.clarification-question-picker input { width: auto; margin: 1px 0; }
