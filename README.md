@@ -17,6 +17,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 - Multiple required or advisory reviewers per agent
 - Configurable review coordinators and designated approvers
 - Pre-build agent request and requirements-gathering approval gate
+- Per-user appearance choice: Lead Ventures Current or Light Professional
 - Immutable prompt-version records
 - Two-person approval control: authors cannot approve their own change
 - Governance categories for fairness, privacy, accuracy, safety, transparency, and security
@@ -103,6 +104,8 @@ For security, disable open sign-ups in Supabase after the first administrator is
 ## Guided tour
 
 The tour opens automatically the first time a person enters the registry. Its steps adapt to the signed-in role: administrators see company and user-access guidance, while editors and viewers receive instructions appropriate to their permissions. Completion is stored only in that browser as a UI preference. Users can restart it from **Take a tour** in the application header.
+
+Each user can also choose **Lead Ventures Current** or **Light Professional** from the Appearance menu. The preference is stored only in that browser and does not affect other users. Lead Ventures Current remains the default.
 
 ## Recommended production hardening
 
