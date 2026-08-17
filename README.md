@@ -38,7 +38,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, and `012` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
+3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, and `013` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -98,6 +98,7 @@ If you already ran the original schema, run these migrations in order in the Sup
 7. `supabase/migrations/010_agent_access_control.sql`
 8. `supabase/migrations/011_platform_resources.sql`
 9. `supabase/migrations/012_agent_technical_fields.sql`
+10. `supabase/migrations/013_resource_insert_policy.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing resources and users can then be assigned to the appropriate company. Company assignment supports organization and filtering; it does not restrict resource access unless an Admin explicitly chooses **Selected Companies**. The directory includes a company dropdown, including companies that do not yet have a resource.
 
@@ -116,6 +117,8 @@ Migration 010 adds personalized resource access and must be run before deploying
 Migration 011 safely expands the existing resource-type constraint to include **Platform** and creates the relational `platform_details` table. Existing agents and skillsets are unchanged. Platform details inherit the parent resource’s Row Level Security rules, including owner, Admin, individual, company, and team access. Run migration 011 after migration 010 because its policies use the access functions introduced there.
 
 Migration 012 restores the four technical assessment columns used by the current resource form: `uses_database`, `uses_api`, `uses_sensitive_data`, and `crosses_departments`. They originally appeared only in retired migration 004, which existing installations correctly skip. The migration is idempotent, preserves all records, and refreshes the Supabase API schema cache.
+
+Migration 013 corrects the resource-creation RLS policy. Admins and Editors may create only records attributed to their authenticated user ID. The migration 010 trigger continues forcing every Editor-created resource to **Owner Only**, with that Editor as accountable owner, until an Admin changes access.
 
 Repository access controls visibility of resource records, prompts, URLs, platform details, and governance information. Availability in this repository does not automatically create a license or user account in an external platform. Follow the listed access instructions or contact the designated administrator.
 
