@@ -1899,10 +1899,28 @@ function AgentForm({
             : "approved",
       ...accessValues,
     };
-    const agentMutation = agent
-      ? supabase.from("agents").update(values).eq("id", agent.id)
-      : supabase.from("agents").insert({ ...values, created_by: user.id });
-    const { data, error: e1 } = await agentMutation.select().single();
+    let data;
+    let e1;
+    if (agent) {
+      const result = await supabase
+        .from("agents")
+        .update(values)
+        .eq("id", agent.id)
+        .select()
+        .single();
+      data = result.data;
+      e1 = result.error;
+    } else {
+      // Avoid requesting the inserted row in the same command. The SELECT RLS
+      // policy resolves access through the agents table and may not see a row
+      // that is still inside its INSERT command.
+      const resourceId = crypto.randomUUID();
+      const result = await supabase
+        .from("agents")
+        .insert({ id: resourceId, ...values, created_by: user.id });
+      data = { id: resourceId };
+      e1 = result.error;
+    }
     if (e1) {
       setChecking(false);
       return setError(e1.message);
