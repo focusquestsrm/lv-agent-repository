@@ -38,7 +38,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, `013`, `014`, and `015` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
+3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, `013`, `014`, `015`, and `016` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -101,6 +101,7 @@ If you already ran the original schema, run these migrations in order in the Sup
 10. `supabase/migrations/013_resource_insert_policy.sql`
 11. `supabase/migrations/014_governance_workflow_and_prompt_reviews.sql`
 12. `supabase/migrations/015_deterministic_governance_and_advisory.sql`
+13. `supabase/migrations/016_likert_risk_scoring_and_threshold.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing resources and users can then be assigned to the appropriate company. Company assignment supports organization and filtering; it does not restrict resource access unless an Admin explicitly chooses **Selected Companies**. The directory includes a company dropdown, including companies that do not yet have a resource.
 
@@ -110,7 +111,7 @@ Migration 007 backfills `public.profiles` from existing Supabase Authentication 
 
 The **Users & Access** page also reconciles Authentication users with access profiles whenever an administrator opens it. This server-side repair requires `SUPABASE_SERVICE_ROLE_KEY` in Netlify and preserves existing roles and company assignments.
 
-Migration 008 adds **Admin → AI Settings** and clears legacy low-risk pending prompts from the risk approval queue. In the application, choose Anthropic Claude, OpenAI (ChatGPT), or Google Gemini and enter the model name. Add the matching API key in Netlify environment variables; keys are never stored in Supabase or exposed to the browser.
+Migration 008 introduced the provider settings now located under **Admin → AI & Governance Settings**. Choose Anthropic Claude, OpenAI (ChatGPT), or Google Gemini only for optional Admin-initiated advisory assessments. Add the matching API key in Netlify environment variables; keys are never stored in Supabase or exposed to the browser.
 
 Migration 009 adds managed departments and categories. It imports distinct department and category text from existing agents without modifying those records, prevents case-insensitive duplicate names, and seeds these default categories: Customer Service; Marketing and Content; Sales and Lead Generation; Data and Analytics; Research; Process Automation; Finance; Human Resources; Compliance and Risk; Education and Student Support; Software Development; and General Productivity. Run this migration in Supabase before deploying the matching application update. Admins manage all values from **Admin → Departments & Categories**; inactive values remain visible to Admins but cannot be selected for new entries.
 
@@ -126,7 +127,9 @@ Migration 014 introduces the durable governance workflow and auditable prompt-re
 
 Migration 015 replaces provider-dependent submission screening with the official deterministic Governance Readiness Assessment. It preserves every assessment version, category score, answer and explanation, initial risk, final risk, mandatory override, clarification, Admin decision, optional AI advisory, and remediation item. It also adds owner-response and Admin-only decision policies. Run it once after migration 014; do not rerun `schema.sql`.
 
-Resource submissions are always saved. The browser calculates the versioned assessment from structured answers, and the database records it atomically with the current official result. Scores of 85–100 clear automatically; 65–84 are medium, 40–64 high, and 0–39 critical. Medium, high, critical, incomplete, and manually flagged resources enter the Admin governance queue. Mandatory overrides can raise final risk but never lower it. Missing information produces **Assessment Pending** rather than a failed save.
+Migration 016 introduces the employee-facing, plain-language Likert assessment and changes the official score to risk points, where higher percentages mean greater risk. It adds a configurable future-assessment review threshold, stores the threshold and score direction with each assessment, and keeps previous decisions unchanged. Run it once after migration 015.
+
+Resource submissions are always saved. Stronger governance controls produce fewer risk points: Strongly Agree = 0, Agree = 25, Not Sure = 50, Disagree = 75, and Strongly Disagree = 100. A justified Not Applicable response is excluded. Category risk is calculated before weights are applied. Scores of 0–19 are Low, 20–39 Moderate-Low, 40–59 Medium, 60–79 High, and 80–100 Critical. The default Admin-review threshold is 40%; Admins may change it under **Admin → AI & Governance Settings** for future assessments. Missing information produces **Assessment Pending**, and mandatory safeguards trigger review independently of the score.
 
 Repository access controls visibility of resource records, prompts, URLs, platform details, and governance information. Availability in this repository does not automatically create a license or user account in an external platform. Follow the listed access instructions or contact the designated administrator.
 
@@ -150,7 +153,7 @@ For security, disable open sign-ups in Supabase after the first administrator is
 
 ## Guided tour
 
-The tour opens automatically the first time a person enters the repository. It explains Agents, Skillsets, Platforms, the directory as the governed source of truth, personalized resources, deterministic governance scoring and overrides, optional advisory AI, accountable ownership, access scope, clarification and remediation, and role-specific controls. Completion is stored only in that browser. Users can restart it from **Take a tour**.
+The tour opens automatically the first time a person enters the repository. It explains that owners complete a plain-language assessment, higher percentages mean greater risk, the default Admin threshold is 40%, lower-risk resources clear automatically, and mandatory safeguards can still require review. It also covers optional advisory AI, accountable ownership, access, clarification, remediation, and role-specific controls. Completion is stored only in that browser. Users can restart it from **Take a tour**.
 
 Each user can choose **Dark** or **Light** from the Appearance menu. The preference is stored only in that browser and does not affect other users. Dark remains the default.
 
@@ -166,6 +169,8 @@ Each user can choose **Dark** or **Light** from the Appearance menu. The prefere
 
 ## Governance and optional AI advisory behavior
 
-The official assessment evaluates Privacy & Data, Security, Safety & Oversight, Fairness & Bias, Accuracy & Grounding, and Transparency without calling an external provider. The same responses and assessment version always produce the same base score. Explicit mandatory overrides determine the final risk and are stored separately for auditability.
+The official assessment evaluates Privacy and Data, Safety and Human Oversight, Security, Fairness, Accuracy, and Transparency and Accountability without calling an external provider. Four context questions reveal only relevant statements. Every statement includes plain-language help and a labeled Likert scale. The browser calculates the result for immediate feedback, and the database independently verifies it before recording the official version. The same responses, assessment version, and threshold always produce the same result. Mandatory override reasons are stored separately from the numeric risk score.
+
+The Admin governance queue contains only current assessments at or above their stored review threshold, mandatory overrides, incomplete assessments, manual clarification flags, and reassessments requiring attention. Automatically cleared resources appear only in the separate searchable assessment history, which is an audit view rather than an approval queue.
 
 Only an active Admin can click **Run AI-Assisted Assessment** for a flagged resource. The server sends sanitized repository metadata and deterministic evidence to the configured provider, validates the structured response, and stores an immutable advisory plus editable remediation tasks. It never updates the official score, final risk, publication status, or access. With no matching server-side API key, the button is disabled and the application displays: “AI-assisted assessment is not configured. The deterministic governance assessment remains available.” Never expose provider keys through a `VITE_` variable.
