@@ -160,6 +160,84 @@
   .taxonomy-panel > form { align-items: stretch; flex-wrap: wrap; }
 }
 
+/* Collapsible Admin navigation */
+.admin-nav { display: grid; gap: 4px; border-top: 1px solid #ffffff1c; margin-top: 6px; padding-top: 6px; }
+.shell nav .admin-nav-toggle { font-weight: 700; }
+.shell nav .admin-nav-toggle b { margin-left: auto; font-size: 16px; line-height: 1; }
+.shell nav .admin-nav-toggle.active-parent { color: #fff; }
+.admin-nav > div { display: grid; gap: 3px; }
+.shell nav .admin-nav > div > button { padding-left: 32px; font-size: 12px; white-space: nowrap; }
+.shell.light-theme .admin-nav { border-top-color: #e9e4df; }
+.shell.light-theme nav .admin-nav-toggle.active-parent { color: #a94427; }
+
+/* Governance review queue */
+.governance-flags {
+  margin: 0 42px 28px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr));
+  gap: 18px;
+}
+.governance-flags article {
+  min-width: 0;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--orange);
+  padding: 22px;
+}
+.governance-flags article > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.governance-flags article h2 { overflow-wrap: anywhere; font: 700 22px/1.2 Georgia, serif; margin: 6px 0 18px; }
+.governance-flags article small { color: #707773; font-size: 10px; text-transform: capitalize; }
+.governance-flags dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0 0 18px; }
+.governance-flags dl div { min-width: 0; border-top: 1px solid #eee; padding-top: 9px; }
+.governance-flags dt { color: #777; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.governance-flags dd { overflow-wrap: anywhere; margin: 5px 0 0; font-size: 12px; }
+.governance-flags article > section { background: #f7f5f2; padding: 14px; }
+.governance-flags article > section h3 { margin: 0 0 7px; font-size: 11px; }
+.governance-flags article > section p { overflow-wrap: anywhere; white-space: normal; margin: 0; color: #5f6763; font-size: 11px; line-height: 1.55; }
+.governance-flags article > footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.governance-flags article > footer a { border: 1px solid var(--line); padding: 10px 13px; color: #a94427; text-decoration: none; }
+.assessment-alerts { margin: 0 42px 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; border-left: 4px solid var(--orange); background: #fff5f1; padding: 14px; }
+.assessment-alerts div { margin-right: auto; }
+.assessment-alerts b, .assessment-alerts span { display: block; }
+.assessment-alerts b { font-size: 12px; }
+.assessment-alerts span { color: #6b716e; font-size: 10px; margin-top: 3px; }
+.assessment-alerts button { border: 1px solid var(--line); background: #fff; padding: 8px 10px; }
+.review-notes { display: block; margin: 14px 0; font-size: 10px; font-weight: 700; }
+.review-notes span { color: #777; font-weight: 400; }
+.review-notes textarea { width: 100%; min-height: 74px; margin-top: 6px; border: 1px solid var(--line); padding: 10px; resize: vertical; }
+.cards button:disabled { opacity: .55; cursor: wait; }
+.company-edit { display: block; margin-top: 10px; border: 1px solid var(--line); background: #fff; padding: 7px 9px; font-size: 10px; }
+.pill.assessment_pending { background: #eef1f8; color: #405a8b; }
+.pill.governance_review { background: #fff0e8; color: #a84427; }
+.pill.cleared { background: #e7f2e9; color: #2d7048; }
+
+.dashboard-hero { grid-template-columns: minmax(0, 1fr); }
+.stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.shell.light-theme .governance-flags article,
+.shell.light-theme .assessment-alerts { box-shadow: 0 4px 18px #2632380a; }
+
+@media (max-width: 900px) {
+  .shell nav .admin-nav button span:first-child { display: inline; }
+  .shell nav .admin-nav > div > button { padding-left: 12px; }
+  .shell nav .admin-nav > div > button span:last-child,
+  .shell nav .admin-nav-toggle span:nth-child(2),
+  .shell nav .admin-nav-toggle b { display: none; }
+}
+
+@media (max-width: 600px) {
+  .shell > aside { overflow: visible; }
+  .shell nav { align-items: flex-start; overflow-x: auto; }
+  .admin-nav { flex: 0 0 auto; position: relative; border-top: 0; margin: 0; padding: 0; }
+  .admin-nav > div { position: absolute; z-index: 10; right: 0; top: 100%; min-width: 235px; padding: 7px; background: var(--dark); box-shadow: 0 10px 25px #0004; }
+  .shell.light-theme .admin-nav > div { background: #fff; }
+  .shell nav .admin-nav > div > button { justify-content: flex-start; padding: 11px 12px; }
+  .shell nav .admin-nav > div > button span:last-child { display: inline; }
+  .governance-flags, .assessment-alerts { margin-left: 15px; margin-right: 15px; }
+  .governance-flags dl { grid-template-columns: 1fr; }
+  .governance-flags article > header, .governance-flags article > footer { align-items: flex-start; flex-direction: column; }
+}
+
 .shell > aside { overflow-y: auto; }
 
 .access-management-fields {

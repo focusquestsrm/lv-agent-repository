@@ -264,6 +264,8 @@ function Registry({ session, profile }) {
     [editingAgent, setEditingAgent] = useState(null),
     [accessModal, setAccessModal] = useState(null),
     [companyModal, setCompanyModal] = useState(false),
+    [editingCompany, setEditingCompany] = useState(null),
+    [adminOpen, setAdminOpen] = useState(true),
     [toast, setToast] = useState(""),
     [theme, setTheme] = useState(
       () => localStorage.getItem("lv-agent-theme") || "current",
@@ -273,6 +275,7 @@ function Registry({ session, profile }) {
     );
   const canEdit = ["admin", "editor"].includes(profile.role),
     admin = profile.role === "admin";
+  const adminViews = ["users", "companies", "taxonomy", "access", "settings"];
   async function load() {
     setBusy(true);
     const [a, v, u, c, d, cat, ua, ca, audit, pd] = await Promise.all([
@@ -322,19 +325,78 @@ function Registry({ session, profile }) {
   useEffect(() => {
     localStorage.setItem("lv-agent-theme", theme);
   }, [theme]);
-  async function approvePrompt(id, status) {
-    const { error } = await supabase
-      .from("prompt_versions")
-      .update({
-        status,
-        approved_by: session.user.id,
-        approved_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-    if (error) setToast(error.message);
-    else {
-      setToast(`Prompt change ${status}.`);
-      load();
+  useEffect(() => {
+    if (!admin && adminViews.includes(view)) setView("dashboard");
+    if (admin && adminViews.includes(view)) setAdminOpen(true);
+  }, [admin, view]);
+  async function approvePrompt(id, status, notes) {
+    try {
+      const response = await fetch("/api/review-prompt", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ versionId: id, decision: status, notes }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setToast(result.message);
+      await load();
+    } catch (error) {
+      console.error("Prompt review failed", error);
+      setToast(
+        error.message ||
+          "We could not record this review decision. Please confirm that you have Admin approval access and try again.",
+      );
+    }
+  }
+  async function retryAssessment(agent) {
+    setToast("Retrying governance assessment…");
+    try {
+      const version = versions.find((item) => item.agent_id === agent.id);
+      const response = await fetch("/api/governance-check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...agent, prompt: version?.prompt_text || "" }),
+      });
+      const assessment = await response.json();
+      if (!response.ok) throw new Error(assessment.error);
+      const status = agent.status === "retired" ? "retired" : assessment.flagged ? "governance_review" : "approved";
+      const { error } = await supabase
+        .from("agents")
+        .update({
+          risk_level: assessment.risk_level,
+          governance_score: assessment.governance_score,
+          governance_flagged: assessment.flagged,
+          governance_summary: assessment.summary,
+          governance_checked_at: new Date().toISOString(),
+          governance_provider: assessment.provider,
+          governance_status: assessment.flagged ? "governance_review" : "cleared",
+          status,
+        })
+        .eq("id", agent.id);
+      if (error) throw error;
+      if (assessment.checks?.length) {
+        await supabase.from("governance_reviews").insert(
+          assessment.checks.map((check) => ({
+            agent_id: agent.id,
+            prompt_version_id: version?.id || null,
+            category: check.category,
+            score: check.score,
+            status: check.status,
+            findings: check.findings,
+            reviewer_id: session.user.id,
+          })),
+        );
+        if (!assessment.flagged && version?.status === "pending")
+          await supabase.from("prompt_versions").update({ status: "approved" }).eq("id", version.id);
+      }
+      setToast(assessment.flagged ? "Assessment completed and routed for Admin review." : "Assessment completed and resource cleared.");
+      await load();
+    } catch (error) {
+      console.error("Governance retry failed", error);
+      setToast("The assessment is still unavailable. The resource remains saved and pending review.");
     }
   }
   async function manageAgent(id, action) {
@@ -369,15 +431,13 @@ function Registry({ session, profile }) {
     ["agents", "▦", "Agents & Platform Directory"],
     ["approvals", "✓", "Prompt Approvals"],
     ["governance", "◇", "AI Governance"],
-    ...(admin
-      ? [
-          ["companies", "◫", "Companies"],
-          ["users", "♙", "Admin · Users & Access"],
-          ["taxonomy", "●", "Admin · Departments & Categories"],
-          ["access", "◆", "Admin · Access Management"],
-          ["settings", "⚙", "Admin · AI Settings"],
-        ]
-      : []),
+  ];
+  const adminNav = [
+    ["users", "♙", "Users & Access"],
+    ["companies", "◫", "Companies"],
+    ["taxonomy", "●", "Departments & Categories"],
+    ["access", "◆", "Access Management"],
+    ["settings", "⚙", "AI Settings"],
   ];
   return (
     <main className={`shell ${theme === "light" ? "light-theme" : ""}`}>
@@ -400,6 +460,26 @@ function Registry({ session, profile }) {
                 )}
             </button>
           ))}
+          {admin && (
+            <div className={`admin-nav ${adminOpen ? "open" : ""}`}>
+              <button
+                type="button"
+                className={`admin-nav-toggle ${adminViews.includes(view) ? "active-parent" : ""}`}
+                aria-expanded={adminOpen}
+                aria-controls="admin-navigation"
+                onClick={() => setAdminOpen((current) => !current)}
+              >
+                <span aria-hidden="true">⚙</span><span>Admin</span><b aria-hidden="true">{adminOpen ? "−" : "+"}</b>
+              </button>
+              <div id="admin-navigation" hidden={!adminOpen}>
+                {adminNav.map(([id, icon, label]) => (
+                  <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}>
+                    <span aria-hidden="true">{icon}</span><span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </nav>
         <div className="me">
           <i>{initials(profile.full_name || profile.email)}</i>
@@ -504,16 +584,17 @@ function Registry({ session, profile }) {
             approve={approvePrompt}
           />
         )}{" "}
-        {view === "governance" && <Governance agents={agents} />}{" "}
-        {view === "companies" && (
+        {view === "governance" && <Governance agents={agents} admin={admin} review={() => setView("approvals")} retry={retryAssessment} />}{" "}
+        {admin && view === "companies" && (
           <Companies
             rows={companies}
             agents={agents}
             admin={admin}
-            open={() => setCompanyModal(true)}
+            open={() => { setEditingCompany(null); setCompanyModal(true); }}
+            edit={(company) => { setEditingCompany(company); setCompanyModal(true); }}
           />
         )}{" "}
-        {view === "users" && (
+        {admin && view === "users" && (
           <Users
             rows={users}
             companies={companies}
@@ -522,7 +603,7 @@ function Registry({ session, profile }) {
             reload={load}
           />
         )}
-        {view === "taxonomy" && (
+        {admin && view === "taxonomy" && (
           <TaxonomyAdmin
             departments={departments}
             categories={categories}
@@ -530,7 +611,7 @@ function Registry({ session, profile }) {
             reload={load}
           />
         )}
-        {view === "access" && (
+        {admin && view === "access" && (
           <AccessManagement
             rows={agents}
             users={users}
@@ -541,7 +622,7 @@ function Registry({ session, profile }) {
             edit={setAccessModal}
           />
         )}
-        {view === "settings" && <AISettings user={session.user} />}
+        {admin && view === "settings" && <AISettings user={session.user} />}
       </section>
       {accessModal && (
         <AccessEditor
@@ -589,13 +670,9 @@ function Registry({ session, profile }) {
               setModal(false);
               setEditingAgent(null);
             }}
-            saved={() => {
+            saved={(message) => {
               setModal(false);
-              setToast(
-                editingAgent
-                  ? "Entry updated and governance assessment completed."
-                  : "Entry created and governance assessment completed.",
-              );
+              setToast(message || (editingAgent ? "Resource updated." : "Resource created."));
               setEditingAgent(null);
               load();
             }}
@@ -604,10 +681,12 @@ function Registry({ session, profile }) {
       {companyModal && (
         <CompanyForm
           user={session.user}
-          close={() => setCompanyModal(false)}
+          company={editingCompany}
+          close={() => { setCompanyModal(false); setEditingCompany(null); }}
           saved={() => {
             setCompanyModal(false);
-            setToast("Company added.");
+            setToast(editingCompany ? "Company updated." : "Company added.");
+            setEditingCompany(null);
             load();
           }}
         />
@@ -625,48 +704,14 @@ function Registry({ session, profile }) {
     </main>
   );
 }
-function Dashboard({ agents, companies, busy, profile, userAccess, companyAccess, canEdit, open }) {
-  const flagged = agents.filter((a) => a.governance_flagged);
-  const owned = [...new Set(agents.map((a) => a.owner_name).filter(Boolean))];
-  const renewalWindow = Date.now() + 90 * 86400000;
-  const platformRenewals = agents.filter((resource) => {
-    const renewal = resource.platform_details?.renewal_at && new Date(resource.platform_details.renewal_at).getTime();
-    return resource.entry_type === "platform" && renewal && renewal <= renewalWindow;
-  }).length;
-  const breakdown = (key, fallback = "Unassigned") =>
-    Object.entries(
-      agents.reduce((totals, resource) => {
-        const value = resource[key] || fallback;
-        totals[value] = (totals[value] || 0) + 1;
-        return totals;
-      }, {}),
-    ).sort((a, b) => b[1] - a[1]);
-  const now = Date.now(),
-    inThirtyDays = now + 30 * 86400000,
-    expiringAgents = agents.filter((agent) => {
-      const expires = agent.access_expires_at && new Date(agent.access_expires_at).getTime();
-      return expires && expires >= now && expires <= inThirtyDays;
-    }).length,
-    expiredAssignments = [...userAccess, ...companyAccess].filter(
-      (assignment) =>
-        assignment.expires_at && new Date(assignment.expires_at).getTime() < now,
-    ).length,
-    accessMetrics =
-      profile.role === "admin"
-        ? [
-            [agents.filter((agent) => agent.access_scope === "entire_team").length, "Entire-team resources"],
-            [agents.filter((agent) => agent.access_scope === "admins_only").length, "Admin-only resources"],
-            [agents.filter((agent) => agent.access_scope === "specific_people").length, "Individually restricted"],
-            [agents.filter((agent) => agent.access_scope === "selected_companies").length, "Company restricted"],
-            [expiringAgents, "Expiring within 30 days"],
-            [expiredAssignments, "Expired assignments"],
-          ]
-        : [
-            [agents.length, "Resources available to you"],
-            [agents.filter((agent) => agent.accountable_owner_id === profile.id).length, "Resources you own"],
-            [agents.filter((agent) => new Date(agent.created_at).getTime() >= now - 30 * 86400000).length, "Recently added"],
-            [expiringAgents, "Expiring access"],
-          ];
+function Dashboard({ agents, companies, busy, canEdit, open }) {
+  const approved = agents.filter(
+    (resource) => resource.governance_status === "cleared" && resource.status !== "retired",
+  );
+  const owned = [...new Set(approved.map((resource) => resource.owner_name).filter(Boolean))];
+  const recent = approved.filter(
+    (resource) => new Date(resource.created_at).getTime() >= Date.now() - 30 * 86400000,
+  );
   return (
     <>
       <section className="dashboard-hero">
@@ -682,36 +727,29 @@ function Dashboard({ agents, companies, busy, profile, userAccess, companyAccess
             </button>
           )}
         </div>
-        <aside>
-          <span>Governance signal</span>
-          <b>{flagged.length}</b>
-          <p>{flagged.length === 1 ? "entry needs" : "entries need"} review</p>
-        </aside>
       </section>
       <Stats
         values={[
-          [agents.length, "Total resources"],
-          [agents.filter((a) => a.entry_type === "agent").length, "Agents"],
-          [agents.filter((a) => a.entry_type === "skillset").length, "Skillsets"],
-          [agents.filter((a) => a.entry_type === "platform").length, "Platforms"],
-          [platformRenewals, "Platform renewals within 90 days"],
-          [flagged.length, "Governance flags"],
+          [approved.length, "Approved resources available"],
+          [approved.filter((resource) => resource.entry_type === "agent").length, "Total Agents"],
+          [approved.filter((resource) => resource.entry_type === "skillset").length, "Total Skillsets"],
+          [approved.filter((resource) => resource.entry_type === "platform").length, "Total Platforms"],
+          [recent.length, "Recently added resources"],
         ]}
       />
-      <Stats values={accessMetrics} />
       {busy ? (
         <Loading />
       ) : (
         <div className="dashboard-grid">
           <section className="panel">
-            <h2>Entries by company</h2>
+            <h2>Resources by Company</h2>
             {companies.length === 0 ? (
               <p className="muted">
                 Add a company to begin portfolio reporting.
               </p>
             ) : (
               companies.map((c) => {
-                const count = agents.filter(
+                const count = approved.filter(
                   (a) => a.company_id === c.id,
                 ).length;
                 return (
@@ -720,7 +758,7 @@ function Dashboard({ agents, companies, busy, profile, userAccess, companyAccess
                     <div>
                       <i
                         style={{
-                          width: `${agents.length ? Math.max(4, (count / agents.length) * 100) : 4}%`,
+                          width: `${approved.length ? Math.max(4, (count / approved.length) * 100) : 4}%`,
                         }}
                       />
                     </div>
@@ -734,7 +772,7 @@ function Dashboard({ agents, companies, busy, profile, userAccess, companyAccess
             <h2>Ownership coverage</h2>
             {owned.length === 0 ? (
               <p className="muted">
-                Owners will appear when agents are registered.
+                Accountable owners will appear when approved resources are available.
               </p>
             ) : (
               owned.slice(0, 6).map((o) => (
@@ -742,33 +780,14 @@ function Dashboard({ agents, companies, busy, profile, userAccess, companyAccess
                   <i>{initials(o)}</i>
                   <span>{o}</span>
                   <b>
-                    {agents.filter((a) => a.owner_name === o).length} agent
-                    {agents.filter((a) => a.owner_name === o).length === 1
-                      ? ""
-                      : "s"}
+                    {approved.filter((resource) => resource.owner_name === o).length} resource{approved.filter((resource) => resource.owner_name === o).length === 1 ? "" : "s"}
                   </b>
                 </div>
               ))
             )}
           </section>
-          {[
-            ["Resources by department", breakdown("department")],
-            ["Resources by category", breakdown("category")],
-            ["Resources by access scope", breakdown("access_scope", "Admins Only").map(([key, count]) => [ACCESS_SCOPE_LABELS[key] || key, count])],
-          ].map(([title, metrics]) => (
-            <section className="panel" key={title}>
-              <h2>{title}</h2>
-              {metrics.length === 0 ? <p className="muted">No resources available.</p> : metrics.slice(0, 6).map(([label, count]) => (
-                <div className="metric-row" key={label}>
-                  <span>{label}</span>
-                  <div><i style={{ width: `${agents.length ? Math.max(4, (count / agents.length) * 100) : 4}%` }} /></div>
-                  <b>{count}</b>
-                </div>
-              ))}
-            </section>
-          ))}
           <section className="panel wide">
-            <h2>Agents and Platform Directory</h2>
+            <h2>Recently Added Resources</h2>
             <div className="table embedded">
               <table>
                 <thead>
@@ -784,7 +803,7 @@ function Dashboard({ agents, companies, busy, profile, userAccess, companyAccess
                   </tr>
                 </thead>
                 <tbody>
-                  {agents.slice(0, 10).map((a) => (
+                  {recent.slice(0, 10).map((a) => (
                     <tr key={a.id}>
                       <td>
                         <b>{a.name}</b>
@@ -1833,21 +1852,15 @@ function AgentForm({
     if (!ownerName) return setError("Select or enter an accountable owner.");
     const submission = { ...form, owner_name: ownerName };
     setChecking(true);
-    let assessment;
-    try {
-      const response = await fetch("/api/governance-check", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(submission),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Governance check failed.");
-      assessment = result;
-    } catch (err) {
+    function saveFailure(stage, technicalError) {
+      console.error(`Resource ${stage} failed`, technicalError);
       setChecking(false);
-      return setError(
-        err.message || "The governance assessment could not be completed.",
-      );
+      setError("We could not save this resource. Please refresh and try again. If the problem continues, contact an administrator.");
+    }
+    function savedWithAttention(stage, technicalError) {
+      console.error(`Saved resource ${stage} failed`, technicalError);
+      setChecking(false);
+      saved("The resource was saved, but part of its setup needs Admin attention before publication.");
     }
     const accessValues = admin
       ? {
@@ -1885,45 +1898,35 @@ function AgentForm({
       uses_api: form.uses_api,
       uses_sensitive_data: form.uses_sensitive_data,
       crosses_departments: form.crosses_departments,
-      risk_level: assessment.risk_level,
-      governance_score: assessment.governance_score,
-      governance_flagged: assessment.flagged,
-      governance_summary: assessment.summary,
-      governance_checked_at: new Date().toISOString(),
-      governance_provider: assessment.provider,
-      status:
-        agent?.status === "retired"
-          ? "retired"
-          : assessment.flagged
-            ? "pending"
-            : "approved",
+      risk_level: agent?.risk_level || "low",
+      governance_score: null,
+      governance_flagged: false,
+      governance_summary: "Governance assessment pending.",
+      governance_checked_at: null,
+      governance_provider: null,
+      governance_status: "assessment_pending",
+      status: agent?.status === "retired" ? "retired" : "assessment_pending",
       ...accessValues,
     };
-    let data;
+    const data = { id: agent?.id || crypto.randomUUID() };
     let e1;
     if (agent) {
       const result = await supabase
         .from("agents")
         .update(values)
-        .eq("id", agent.id)
-        .select()
-        .single();
-      data = result.data;
+        .eq("id", agent.id);
       e1 = result.error;
     } else {
       // Avoid requesting the inserted row in the same command. The SELECT RLS
       // policy resolves access through the agents table and may not see a row
       // that is still inside its INSERT command.
-      const resourceId = crypto.randomUUID();
       const result = await supabase
         .from("agents")
-        .insert({ id: resourceId, ...values, created_by: user.id });
-      data = { id: resourceId };
+        .insert({ id: data.id, ...values, created_by: user.id });
       e1 = result.error;
     }
     if (e1) {
-      setChecking(false);
-      return setError(e1.message);
+      return saveFailure("record", e1);
     }
     const platformMutation = form.entry_type === "platform"
       ? supabase.from("platform_details").upsert({
@@ -1941,8 +1944,7 @@ function AgentForm({
       : supabase.from("platform_details").delete().eq("agent_id", data.id);
     const { error: platformError } = await platformMutation;
     if (platformError) {
-      setChecking(false);
-      return setError(platformError.message);
+      return savedWithAttention("platform details", platformError);
     }
     let versionNumber = 1;
     if (agent) {
@@ -1954,41 +1956,26 @@ function AgentForm({
         .limit(1)
         .maybeSingle();
       if (versionLookupError) {
-        setChecking(false);
-        return setError(versionLookupError.message);
+        return savedWithAttention("prompt history lookup", versionLookupError);
       }
       versionNumber = (latest?.version_number || 0) + 1;
     }
-    const { data: version, error: e2 } = await supabase
+    const version = { id: crypto.randomUUID() };
+    const { error: e2 } = await supabase
       .from("prompt_versions")
       .insert({
+        id: version.id,
         agent_id: data.id,
         version_number: versionNumber,
         prompt_text: form.prompt,
         change_explanation: agent
-          ? "Resource details edited and re-evaluated by AI governance."
-          : "Initial prompt evaluated by AI governance.",
-        status: assessment.flagged ? "pending" : "approved",
+          ? "Resource details saved and queued for AI governance."
+          : "Initial prompt saved and queued for AI governance.",
+        status: "pending",
         created_by: user.id,
-      })
-      .select()
-      .single();
+      });
     if (e2) {
-      setChecking(false);
-      return setError(e2.message);
-    }
-    if (assessment.checks?.length) {
-      await supabase.from("governance_reviews").insert(
-        assessment.checks.map((check) => ({
-          agent_id: data.id,
-          prompt_version_id: version.id,
-          category: check.category,
-          score: check.score,
-          status: check.status,
-          findings: check.findings,
-          reviewer_id: user.id,
-        })),
-      );
+      return savedWithAttention("prompt history", e2);
     }
     if (admin) {
       const [removePeople, removeCompanies] = await Promise.all([
@@ -1997,8 +1984,7 @@ function AgentForm({
       ]);
       const removalError = removePeople.error || removeCompanies.error;
       if (removalError) {
-        setChecking(false);
-        return setError(removalError.message);
+        return savedWithAttention("access assignments", removalError);
       }
       const assignmentValues = {
         permission_level: form.access_permission,
@@ -2017,8 +2003,7 @@ function AgentForm({
             })),
           );
         if (peopleError) {
-          setChecking(false);
-          return setError(peopleError.message);
+          return savedWithAttention("people access", peopleError);
         }
       }
       if (
@@ -2035,13 +2020,61 @@ function AgentForm({
             })),
           );
         if (companiesError) {
-          setChecking(false);
-          return setError(companiesError.message);
+          return savedWithAttention("company access", companiesError);
         }
       }
     }
+    let assessment;
+    try {
+      const response = await fetch("/api/governance-check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(submission),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Governance check failed.");
+      assessment = result;
+    } catch (assessmentError) {
+      console.error("Governance assessment unavailable", assessmentError);
+      setChecking(false);
+      saved("Resource saved. Governance assessment is pending; an Admin can retry it from AI Governance.");
+      return;
+    }
+    const { error: assessmentSaveError } = await supabase
+      .from("agents")
+      .update({
+        risk_level: assessment.risk_level,
+        governance_score: assessment.governance_score,
+        governance_flagged: assessment.flagged,
+        governance_summary: assessment.summary,
+        governance_checked_at: new Date().toISOString(),
+        governance_provider: assessment.provider,
+        governance_status: assessment.flagged ? "governance_review" : "cleared",
+        status: agent?.status === "retired" ? "retired" : assessment.flagged ? "governance_review" : "approved",
+      })
+      .eq("id", data.id);
+    if (assessmentSaveError) {
+      console.error("Governance result persistence failed", assessmentSaveError);
+      setChecking(false);
+      saved("Resource saved. Its assessment result still needs Admin attention.");
+      return;
+    }
+    if (!assessment.flagged)
+      await supabase.from("prompt_versions").update({ status: "approved" }).eq("id", version.id);
+    if (assessment.checks?.length)
+      await supabase.from("governance_reviews").insert(
+        assessment.checks.map((check) => ({
+          agent_id: data.id,
+          prompt_version_id: version.id,
+          category: check.category,
+          score: check.score,
+          status: check.status,
+          findings: check.findings,
+          reviewer_id: user.id,
+        })),
+      );
     setChecking(false);
-    saved();
+    saved(assessment.flagged ? "Resource saved and routed for Admin governance review." : "Resource saved, cleared, and published.");
   }
   return (
     <div className="backdrop">
@@ -2426,10 +2459,10 @@ function AgentForm({
           </button>
           <button className="primary" disabled={checking}>
             {checking
-              ? "Running governance check…"
+              ? "Saving and assessing…"
               : agent
-                ? "Check governance & save"
-                : "Check governance & create"}
+                ? "Save & assess"
+                : "Save resource & assess"}
           </button>
         </footer>
       </form>
@@ -2455,40 +2488,48 @@ function Approvals({ rows, busy, admin, approve }) {
       ) : (
         <div className="cards">
           {pending.map((v) => (
-            <article key={v.id}>
-              <div>
-                <small>
-                  {v.agents?.name} · v{v.version_number}
-                </small>
-                <h3>{v.change_explanation}</h3>
-                <pre>{v.prompt_text}</pre>
-              </div>
-              <footer>
-                {admin ? (
-                  <>
-                    <button onClick={() => approve(v.id, "changes_requested")}>
-                      Request changes
-                    </button>
-                    <button
-                      className="primary"
-                      onClick={() => approve(v.id, "approved")}
-                    >
-                      Approve & publish
-                    </button>
-                  </>
-                ) : (
-                  <span>Admin approval required</span>
-                )}
-              </footer>
-            </article>
+            <ApprovalCard key={v.id} version={v} admin={admin} approve={approve} />
           ))}
         </div>
       )}
     </>
   );
 }
-function Governance({ agents }) {
+function ApprovalCard({ version, admin, approve }) {
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  async function decide(decision) {
+    setSubmitting(true);
+    await approve(version.id, decision, notes);
+    setSubmitting(false);
+  }
+  return (
+    <article>
+      <div>
+        <small>{version.agents?.name} · v{version.version_number}</small>
+        <h3>{version.change_explanation}</h3>
+        <pre>{version.prompt_text}</pre>
+      </div>
+      {admin && (
+        <label className="review-notes">
+          Decision notes <span>(optional)</span>
+          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Add context for the author or audit history." />
+        </label>
+      )}
+      <footer>
+        {admin ? (
+          <>
+            <button disabled={submitting} onClick={() => decide("changes_requested")}>Request changes</button>
+            <button className="primary" disabled={submitting} onClick={() => decide("approved")}>Approve & publish</button>
+          </>
+        ) : <span>Admin approval required</span>}
+      </footer>
+    </article>
+  );
+}
+function Governance({ agents, admin, review, retry }) {
   const flagged = agents.filter((agent) => agent.governance_flagged);
+  const pending = agents.filter((agent) => agent.governance_status === "assessment_pending");
   return (
     <>
       <PageHead
@@ -2496,6 +2537,12 @@ function Governance({ agents }) {
         title="AI Governance"
         desc="Automated screening across fairness, privacy, accuracy, safety, transparency, and security. Only meaningful risk is flagged."
       />
+      {admin && pending.length > 0 && (
+        <section className="assessment-alerts" aria-label="Pending governance assessments">
+          <div><b>Assessment attention needed</b><span>{pending.length} saved resource{pending.length === 1 ? " is" : "s are"} waiting for an AI assessment.</span></div>
+          {pending.map((agent) => <button key={agent.id} onClick={() => retry(agent)}>Retry {agent.name}</button>)}
+        </section>
+      )}
       {flagged.length === 0 ? (
         <Empty
           title="No governance risks flagged"
@@ -2507,22 +2554,29 @@ function Governance({ agents }) {
             <article key={agent.id}>
               <header>
                 <div>
-                  <small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned"}</small>
+                  <small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned company"}</small>
                   <h2>{agent.name}</h2>
                 </div>
                 <span className="risk-flag">⚑ {agent.risk_level} risk</span>
               </header>
-              <p>{agent.governance_summary}</p>
+              <dl>
+                <div><dt>Accountable owner</dt><dd>{agent.owner_name || "Unassigned"}</dd></div>
+                <div><dt>Governance score</dt><dd>{agent.governance_score ?? "—"}{agent.governance_score != null ? "%" : ""}</dd></div>
+                <div><dt>AI provider</dt><dd>{agent.governance_provider || "Automated assessment"}</dd></div>
+                <div><dt>Date assessed</dt><dd>{agent.governance_checked_at ? new Date(agent.governance_checked_at).toLocaleDateString() : "Pending"}</dd></div>
+                <div><dt>Review status</dt><dd><Pill text={agent.governance_status || "governance_review"} /></dd></div>
+              </dl>
+              <section><h3>Governance summary</h3><p>{agent.governance_summary || "Admin review is required before publication."}</p></section>
               <footer>
-                <b>Governance score: {agent.governance_score ?? "—"}</b>
-                <span>{agent.governance_provider || "Automated assessment"}</span>
+                {admin && <button className="primary" onClick={review}>Review Resource</button>}
+                {agent.url && <a className="open-resource" href={agent.url} target="_blank" rel="noreferrer">Open Resource ↗</a>}
               </footer>
             </article>
           ))}
         </div>
       )}
       <section className="standard">
-        <h2>Lead Ventures agent standard</h2>
+        <h2>Lead Ventures Resource Standard</h2>
         <div>
           {[
             "Clear approved purpose",
@@ -2541,7 +2595,7 @@ function Governance({ agents }) {
     </>
   );
 }
-function Companies({ rows, agents, admin, open }) {
+function Companies({ rows, agents, admin, open, edit }) {
   return (
     <>
       <PageHead
@@ -2583,6 +2637,7 @@ function Companies({ rows, agents, admin, open }) {
                   {agents.filter((a) => a.company_id === c.id).length} agents ·{" "}
                   {c.status}
                 </span>
+                <button className="company-edit" onClick={() => edit(c)}>Edit company</button>
               </div>
             </article>
           ))}
@@ -2591,15 +2646,24 @@ function Companies({ rows, agents, admin, open }) {
     </>
   );
 }
-function CompanyForm({ user, close, saved }) {
-  const [form, setForm] = useState({ name: "", description: "", website: "" }),
+function CompanyForm({ user, company, close, saved }) {
+  const [form, setForm] = useState({
+      name: company?.name || "",
+      description: company?.description || "",
+      website: company?.website || "",
+      status: company?.status || "active",
+    }),
     [error, setError] = useState("");
   async function submit(e) {
     e.preventDefault();
-    const { error } = await supabase
-      .from("companies")
-      .insert({ ...form, website: form.website || null, created_by: user.id });
-    if (error) setError(error.message);
+    const values = { ...form, website: form.website || null };
+    const { error } = company
+      ? await supabase.from("companies").update(values).eq("id", company.id)
+      : await supabase.from("companies").insert({ ...values, created_by: user.id });
+    if (error) {
+      console.error("Company save failed", error);
+      setError("We could not save this company. Confirm your Admin access and try again.");
+    }
     else saved();
   }
   return (
@@ -2608,7 +2672,7 @@ function CompanyForm({ user, close, saved }) {
         <header>
           <div>
             <small>ADMINISTRATION</small>
-            <h2>Add a company</h2>
+            <h2>{company ? "Edit company" : "Add a company"}</h2>
           </div>
           <button type="button" onClick={close}>
             ×
@@ -2638,12 +2702,19 @@ function CompanyForm({ user, close, saved }) {
             onChange={(e) => setForm({ ...form, website: e.target.value })}
           />
         </label>
+        <label>
+          Status
+          <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </label>
         {error && <div className="message">{error}</div>}
         <footer>
           <button type="button" onClick={close}>
             Cancel
           </button>
-          <button className="primary">Add company</button>
+          <button className="primary">{company ? "Save company" : "Add company"}</button>
         </footer>
       </form>
     </div>
@@ -3098,7 +3169,7 @@ function Tour({ role, setView, close }) {
       view: "dashboard",
       eyebrow: "WELCOME",
       title: "Build boldly. Govern intelligently.",
-      text: "The dashboard summarizes agents, reusable skillsets, approved platforms, companies, accountable owners, access, renewals, and meaningful governance risk across Lead Ventures.",
+      text: "The Dashboard focuses on approved resources available to you, totals by resource type, company distribution, accountable ownership, and recently added resources—not access-administration metrics.",
     },
     {
       view: "agents",
@@ -3125,7 +3196,7 @@ function Tour({ role, setView, close }) {
       view: "governance",
       eyebrow: "AUTOMATED GOVERNANCE",
       title: "Screen every new entry",
-      text: "A secure AI assessment checks fairness, privacy, accuracy, safety, transparency, and security. Only medium, high, or critical risk is flagged for review.",
+      text: "Resources are saved before assessment. Medium, high, or critical risk appears in AI Governance for Admin attention; temporary provider failures remain saved and can be retried.",
     },
     {
       view: "approvals",
@@ -3136,16 +3207,22 @@ function Tour({ role, setView, close }) {
     ...(role === "admin"
       ? [
           {
-            view: "companies",
-            eyebrow: "TENANT MANAGEMENT",
-            title: "Add Lead Ventures companies",
-            text: "Create each company under the Lead Ventures tenant. Resources and users can be assigned and filtered by company without making company assignment an access restriction.",
+            view: "users",
+            eyebrow: "ADMIN NAVIGATION",
+            title: "Expand the Admin section",
+            text: "Admins can expand or collapse one organized navigation section containing Users & Access, Companies, Departments & Categories, Access Management, and AI Settings.",
           },
           {
             view: "users",
             eyebrow: "ADMIN VIEW",
             title: "Manage users and access",
             text: "Only Admins see the user-access area. Assign each person to a company and change their role to Admin, Editor, or Viewer.",
+          },
+          {
+            view: "companies",
+            eyebrow: "TENANT MANAGEMENT",
+            title: "Add Lead Ventures companies",
+            text: "Create each company under the Lead Ventures tenant. Resources and users can be assigned and filtered by company without making company assignment an access restriction.",
           },
           {
             view: "taxonomy",
