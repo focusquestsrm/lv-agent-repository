@@ -1,6 +1,6 @@
 # Lead Ventures Agent Registry
 
-A clean, production-oriented Netlify + Supabase application for cataloging AI agents, preserving prompt history, managing approvals, evaluating responsible-AI controls, and enforcing Admin/Editor/Viewer access.
+A production-oriented Netlify + Supabase application for cataloging AI agents and skillsets, preserving prompt history, screening new entries for governance risk, and enforcing Admin/Editor/Viewer access.
 
 This package contains no demonstration records. `danielle@focusquest.com` and the first person who creates an account become administrators; every later account starts as an editor.
 
@@ -8,23 +8,21 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 - Email/password authentication
 - Self-service account creation and password recovery
-- Empty agent directory with governed intake
+- Direct creation of agents and reusable skillsets by Admins and Editors
 - Admin-managed Lead Ventures companies
 - Required company selection during agent intake
 - Company assignment for users
 - Portfolio dashboard for agents, companies, owners, status, risk, and governance
-- Adaptive approval routing for individual versus technical/integrated agents
-- Multiple required or advisory reviewers per agent
-- Configurable review coordinators and designated approvers
-- Pre-build agent request and requirements-gathering approval gate
-- Per-user appearance choice: Lead Ventures Current or Light Professional
+- Automated governance screening through a server-side Anthropic API call
+- Risk-based escalation: only medium, high, or critical results are flagged
+- Per-user appearance choice: Dark or Light
 - Immutable prompt-version records
 - Two-person approval control: authors cannot approve their own change
 - Governance categories for fairness, privacy, accuracy, safety, transparency, and security
 - Admin, Editor, and Viewer database permissions
 - User-role administration
 - Supabase Row Level Security
-- Netlify SPA routing and serverless invitation endpoint
+- Netlify SPA routing and serverless invitation and governance endpoints
 - Official Lead Ventures branding
 - Role-aware guided product tour for first-time users
 
@@ -32,7 +30,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. For a brand-new installation, also run `supabase/migrations/005_prebuild_agent_requests.sql` once to add the pre-build requirements workflow.
+3. If `schema.sql` completed successfully, run `006_open_creation_governance_scan.sql` and `007_sync_users_and_admins.sql`. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -53,9 +51,11 @@ Fill `.env` with:
 VITE_SUPABASE_URL=your_project_url
 VITE_SUPABASE_ANON_KEY=your_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
 ```
 
-The service-role variable is used only by the invitation function. When using plain `vite`, that function is unavailable; use Netlify local development if testing invitations.
+The service-role and Anthropic variables are server-only. Never prefix them with `VITE_`. When using plain `vite`, Netlify functions are unavailable; use Netlify local development to test invitations and governance screening.
 
 ## 3. Deploy to Netlify
 
@@ -66,6 +66,8 @@ The service-role variable is used only by the invitation function. When using pl
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY` — scope to Functions when your Netlify plan supports scopes
+   - `ANTHROPIC_API_KEY` — server-only governance assessment key
+   - `ANTHROPIC_MODEL` — optional model override
 5. Deploy the site.
 6. Return to Supabase and add the final Netlify URL to Authentication redirect URLs.
 
@@ -77,14 +79,14 @@ If you already ran the original schema, run these migrations in order in the Sup
 
 1. `supabase/migrations/002_self_service_auth.sql`
 2. `supabase/migrations/003_companies_dashboard.sql`
-3. `supabase/migrations/004_adaptive_approval_workflow.sql`
-4. `supabase/migrations/005_prebuild_agent_requests.sql`
+3. `supabase/migrations/006_open_creation_governance_scan.sql`
+4. `supabase/migrations/007_sync_users_and_admins.sql`
 
-Do not rerun `schema.sql` on an existing installation. After migration 003, open **Companies** as an Admin and add each Lead Ventures company. Existing agents and users can then be assigned to the appropriate company.
+Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing agents and users can then be assigned to the appropriate company. The Agents & skillsets page includes an **Agents by company** dropdown, including companies that do not yet have an agent.
 
-After migration 004, use **Users & Access** to enable **Can assign reviews** for Eli and **Can approve agents** for Danielle, Sean, and any other designated reviewers. Technical or cross-functional agents are flagged during intake; Admins and review coordinators can assign multiple required or advisory reviewers. An agent cannot reach approved status until every required reviewer has approved it.
+Migration 006 retires the pre-build authorization workflow from the live application. Existing request data remains in the database for audit history, but users create agents and skillsets directly. Each new entry must complete the governance API screening. Low-risk entries are cleared automatically; only medium, high, or critical results are flagged.
 
-Migration 005 adds the requirements gate. Team members submit an Agent Request before development begins. The intake captures the business problem, desired outcome, users, current process, success measures, data, integrations, affected areas, scope, and risk indicators. Admins and review coordinators assign multiple reviewers. Only a request with all required approvals can be marked **Build authorized** and converted into an agent record.
+Migration 007 backfills `public.profiles` from existing Supabase Authentication users and repairs the signup trigger for future accounts. It also grants Admin access to Danielle, Sean (`sean@focusquest.com`), Eliana (`eliana@lead-ventures.com`), and Mariano (`mcarcamo@back2learn.com`). You can change any person between Admin, Editor, and Viewer from **Admin · Users & access**.
 
 The sign-in screen also includes **Forgot your password?**. It sends a Supabase recovery email back to the application, where the user chooses and confirms a new password.
 
@@ -96,16 +98,16 @@ For security, disable open sign-ups in Supabase after the first administrator is
 |---|:---:|:---:|:---:|
 | View agents, prompts, governance, and history | ✓ | ✓ | ✓ |
 | Add agents and prompt versions | ✓ | ✓ | — |
-| Complete governance reviews | ✓ | ✓ | — |
+| Create governance assessment records | ✓ | ✓ | — |
 | Approve and publish another person’s prompt | ✓ | — | — |
 | Change user roles and company assignments | ✓ | — | — |
 | Add and manage companies | ✓ | — | — |
 
 ## Guided tour
 
-The tour opens automatically the first time a person enters the registry. Its steps adapt to the signed-in role: administrators see company and user-access guidance, while editors and viewers receive instructions appropriate to their permissions. Completion is stored only in that browser as a UI preference. Users can restart it from **Take a tour** in the application header.
+The tour opens automatically the first time a person enters the registry. It explains direct agent and skillset creation, automated governance screening, risk-based review, and role-specific controls. Administrators see company and user-access guidance, while editors and viewers receive instructions appropriate to their permissions. Completion is stored only in that browser. Users can restart it from **Take a tour**.
 
-Each user can also choose **Lead Ventures Current** or **Light Professional** from the Appearance menu. The preference is stored only in that browser and does not affect other users. Lead Ventures Current remains the default.
+Each user can choose **Dark** or **Light** from the Appearance menu. The preference is stored only in that browser and does not affect other users. Dark remains the default.
 
 ## Recommended production hardening
 
@@ -117,6 +119,6 @@ Each user can also choose **Lead Ventures Current** or **Light Professional** fr
 - Keep Supabase and Netlify secrets out of source control.
 - Review roles quarterly and remove inactive accounts promptly.
 
-## Claude change explanations
+## Governance API behavior
 
-The schema stores `change_explanation` on every prompt version. The included UI asks the editor for the explanation. To automate this with Claude, add a server-side Netlify function that receives the old and proposed prompts, calls Claude using a server-only API key, and writes the returned explanation. Never expose the Claude API key through a `VITE_` variable.
+The governance function evaluates fairness, privacy, accuracy, safety, transparency, and security. Creation fails closed if the assessment service is unavailable, so an unchecked entry is not silently added. Keep the Anthropic API key in Netlify Functions only and never expose it through a `VITE_` variable.

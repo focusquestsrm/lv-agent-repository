@@ -11,6 +11,7 @@ const checks = [
 export default function App() {
   const [session, setSession] = useState(null),
     [profile, setProfile] = useState(null),
+    [profileError, setProfileError] = useState(""),
     [loading, setLoading] = useState(true),
     [recovery, setRecovery] = useState(false);
   useEffect(() => {
@@ -35,14 +36,25 @@ export default function App() {
         .select("*")
         .eq("id", session.user.id)
         .single()
-        .then(({ data }) => setProfile(data));
+        .then(({ data, error }) => {
+          setProfile(data);
+          setProfileError(error?.message || (!data ? "Your account exists, but its access profile has not been created yet." : ""));
+        });
     else if (!session) setProfile(null);
   }, [session, recovery]);
   if (loading) return <Splash text="Loading secure workspace…" />;
   if (!configured) return <Setup />;
   if (recovery) return <SetPassword done={() => setRecovery(false)} />;
   if (!session) return <Auth />;
-  if (!profile) return <Splash text="Preparing your account…" />;
+  if (!profile)
+    return (
+      <Splash
+        text={
+          profileError ||
+          "Preparing your account…"
+        }
+      />
+    );
   return (
     <Registry session={session} profile={profile} setProfile={setProfile} />
   );
@@ -242,11 +254,8 @@ function Registry({ session, profile }) {
     [versions, setVersions] = useState([]),
     [users, setUsers] = useState([]),
     [companies, setCompanies] = useState([]),
-    [requests, setRequests] = useState([]),
-    [requestApprovals, setRequestApprovals] = useState([]),
     [busy, setBusy] = useState(true),
     [modal, setModal] = useState(false),
-    [requestModal, setRequestModal] = useState(false),
     [companyModal, setCompanyModal] = useState(false),
     [toast, setToast] = useState(""),
     [theme, setTheme] = useState(
@@ -256,12 +265,10 @@ function Registry({ session, profile }) {
       () => localStorage.getItem("lv-agent-tour-complete") !== "yes",
     );
   const canEdit = ["admin", "editor"].includes(profile.role),
-    admin = profile.role === "admin",
-    coordinator = admin || profile.can_assign_reviews,
-    approver = admin || profile.can_approve_agents;
+    admin = profile.role === "admin";
   async function load() {
     setBusy(true);
-    const [a, v, u, c, r, ra] = await Promise.all([
+    const [a, v, u, c] = await Promise.all([
       supabase
         .from("agents")
         .select("*,companies(name)")
@@ -272,23 +279,11 @@ function Registry({ session, profile }) {
         .order("created_at", { ascending: false }),
       supabase.from("profiles").select("*,companies(name)").order("full_name"),
       supabase.from("companies").select("*").order("name"),
-      supabase
-        .from("agent_requests")
-        .select(
-          "*,companies(name),requester:profiles!requested_by(full_name,email)",
-        )
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("request_approvals")
-        .select("*,reviewer:profiles!reviewer_id(full_name,email)")
-        .order("assigned_at"),
     ]);
     setAgents(a.data || []);
     setVersions(v.data || []);
     setUsers(u.data || []);
     setCompanies(c.data || []);
-    setRequests(r.data || []);
-    setRequestApprovals(ra.data || []);
     setBusy(false);
   }
   useEffect(() => {
@@ -312,68 +307,17 @@ function Registry({ session, profile }) {
       load();
     }
   }
-  async function decideRequest(id, status, notes = "") {
-    const { error } = await supabase
-      .from("request_approvals")
-      .update({
-        status,
-        reviewer_notes: notes || null,
-        decided_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-    if (error) setToast(error.message);
-    else {
-      setToast(`Request review ${status.replaceAll("_", " ")}.`);
-      load();
-    }
-  }
-  async function assignReview(
-    request_id,
-    reviewer_id,
-    review_type,
-    required = true,
-  ) {
-    const { error } = await supabase
-      .from("request_approvals")
-      .upsert(
-        {
-          request_id,
-          reviewer_id,
-          review_type,
-          required,
-          assigned_by: session.user.id,
-        },
-        { onConflict: "request_id,reviewer_id,review_type" },
-      );
-    if (error) setToast(error.message);
-    else {
-      setToast("Reviewer assigned.");
-      load();
-    }
-  }
-  async function authorize(id) {
-    const { error } = await supabase
-      .from("agent_requests")
-      .update({ status: "build_authorized" })
-      .eq("id", id)
-      .eq("status", "approved");
-    if (error) setToast(error.message);
-    else {
-      setToast("Build authorized. The request can now become an agent.");
-      load();
-    }
-  }
-  const pending = requestApprovals.filter(
-    (x) => x.status === "assigned" && x.reviewer_id === session.user.id,
-  ).length;
   const nav = [
     ["dashboard", "▥", "Dashboard"],
-    ["requests", "＋", "Agent requests"],
-    ["agents", "▦", "Agent directory"],
+    ["agents", "▦", "Agents & skillsets"],
     ["approvals", "✓", "Prompt approvals"],
     ["governance", "◇", "AI governance"],
-    ...(admin ? [["companies", "◫", "Companies"]] : []),
-    ["users", "♙", "Users & access"],
+    ...(admin
+      ? [
+          ["companies", "◫", "Companies"],
+          ["users", "♙", "Admin · Users & access"],
+        ]
+      : []),
   ];
   return (
     <main className={`shell ${theme === "light" ? "light-theme" : ""}`}>
@@ -388,7 +332,6 @@ function Registry({ session, profile }) {
             >
               {icon}
               <span>{label}</span>
-              {id === "requests" && pending > 0 && <em>{pending}</em>}
               {id === "approvals" &&
                 versions.filter((v) => v.status === "pending").length > 0 && (
                   <em>
@@ -399,8 +342,8 @@ function Registry({ session, profile }) {
           ))}
         </nav>
         <div className="health">
-          <b>Build authorization</b>
-          <p>Requirements → routing → review → approval → build</p>
+          <b>Governance monitoring</b>
+          <p>Create freely · Review only when risk is flagged</p>
         </div>
         <div className="me">
           <i>{initials(profile.full_name || profile.email)}</i>
@@ -418,8 +361,7 @@ function Registry({ session, profile }) {
               {
                 {
                   dashboard: "Dashboard",
-                  requests: "Agent requests",
-                  agents: "Directory",
+                  agents: "Agents & skillsets",
                   approvals: "Prompt approvals",
                   governance: "AI governance",
                   companies: "Companies",
@@ -436,8 +378,8 @@ function Registry({ session, profile }) {
                 value={theme}
                 onChange={(e) => setTheme(e.target.value)}
               >
-                <option value="current">Lead Ventures Current</option>
-                <option value="light">Light Professional</option>
+                <option value="current">Dark</option>
+                <option value="light">Light</option>
               </select>
             </label>
             <button className="tour-trigger" onClick={() => setTour(true)}>
@@ -453,21 +395,11 @@ function Registry({ session, profile }) {
           </div>
         )}
         {view === "dashboard" && (
-          <Dashboard agents={agents} companies={companies} busy={busy} />
-        )}{" "}
-        {view === "requests" && (
-          <Requests
-            rows={requests}
-            approvals={requestApprovals}
-            users={users}
-            session={session}
+          <Dashboard
+            agents={agents}
+            companies={companies}
             busy={busy}
-            coordinator={coordinator}
-            approver={approver}
-            open={() => setRequestModal(true)}
-            assign={assignReview}
-            decide={decideRequest}
-            authorize={authorize}
+            open={() => setModal(true)}
           />
         )}{" "}
         {view === "agents" && (
@@ -505,26 +437,14 @@ function Registry({ session, profile }) {
           />
         )}
       </section>
-      {requestModal && (
-        <RequestForm
-          user={session.user}
-          companies={companies}
-          close={() => setRequestModal(false)}
-          saved={() => {
-            setRequestModal(false);
-            setToast("Agent request submitted for triage.");
-            load();
-          }}
-        />
-      )}
-      {modal && (
-        <AgentForm
-          user={session.user}
-          requests={requests}
-          close={() => setModal(false)}
-          saved={() => {
-            setModal(false);
-            setToast("Authorized agent created.");
+        {modal && (
+          <AgentForm
+            user={session.user}
+            companies={companies}
+            close={() => setModal(false)}
+            saved={() => {
+              setModal(false);
+              setToast("Entry created and governance assessment completed.");
             load();
           }}
         />
@@ -553,26 +473,35 @@ function Registry({ session, profile }) {
     </main>
   );
 }
-function Dashboard({ agents, companies, busy }) {
+function Dashboard({ agents, companies, busy, open }) {
+  const flagged = agents.filter((a) => a.governance_flagged);
   const owned = [...new Set(agents.map((a) => a.owner_name).filter(Boolean))];
   return (
     <>
-      <PageHead
-        tag="PORTFOLIO OVERVIEW"
-        title="Dashboard"
-        desc="See AI activity, ownership, company coverage, risk, and governance across Lead Ventures."
-      />
+      <section className="dashboard-hero">
+        <div>
+          <small>LEAD VENTURES AI ENABLEMENT</small>
+          <h1>Build boldly. Govern intelligently.</h1>
+          <p>
+            Create agents and skillsets freely. Keep ownership visible. Escalate
+            only meaningful governance risk.
+          </p>
+          <button className="primary" onClick={open}>
+            ＋ Add agent or skillset
+          </button>
+        </div>
+        <aside>
+          <span>Governance signal</span>
+          <b>{flagged.length}</b>
+          <p>{flagged.length === 1 ? "entry needs" : "entries need"} review</p>
+        </aside>
+      </section>
       <Stats
         values={[
-          [agents.length, "Total agents"],
-          [companies.length, "Companies"],
-          [owned.length, "Accountable owners"],
-          [
-            agents.filter(
-              (a) => a.status === "pending" || a.status === "review",
-            ).length,
-            "Awaiting review",
-          ],
+          [agents.length, "Total entries"],
+          [agents.filter((a) => a.entry_type !== "skillset").length, "Agents"],
+          [agents.filter((a) => a.entry_type === "skillset").length, "Skillsets"],
+          [flagged.length, "Governance flags"],
         ]}
       />
       {busy ? (
@@ -580,7 +509,7 @@ function Dashboard({ agents, companies, busy }) {
       ) : (
         <div className="dashboard-grid">
           <section className="panel">
-            <h2>Agents by company</h2>
+            <h2>Entries by company</h2>
             {companies.length === 0 ? (
               <p className="muted">
                 Add a company to begin portfolio reporting.
@@ -628,12 +557,13 @@ function Dashboard({ agents, companies, busy }) {
             )}
           </section>
           <section className="panel wide">
-            <h2>Agent portfolio</h2>
+            <h2>Agent and skillset portfolio</h2>
             <div className="table embedded">
               <table>
                 <thead>
                   <tr>
-                    <th>Agent</th>
+                    <th>Entry</th>
+                    <th>Type</th>
                     <th>Company</th>
                     <th>Owner</th>
                     <th>Platform</th>
@@ -648,15 +578,14 @@ function Dashboard({ agents, companies, busy }) {
                       <td>
                         <b>{a.name}</b>
                       </td>
+                      <td>{a.entry_type || "agent"}</td>
                       <td>{a.companies?.name || "Unassigned"}</td>
                       <td>{a.owner_name}</td>
                       <td>{a.platform}</td>
                       <td>
                         <Pill text={a.status} />
                       </td>
-                      <td>
-                        <Pill text={a.risk_level} />
-                      </td>
+                      <td>{a.governance_flagged ? <span className="risk-flag">⚑ {a.risk_level} risk</span> : <span className="governance-cleared">✓ Cleared</span>}</td>
                       <td>
                         {a.governance_score == null
                           ? "—"
@@ -673,36 +602,31 @@ function Dashboard({ agents, companies, busy }) {
     </>
   );
 }
-function Agents({ rows, busy, canEdit, open }) {
+function Agents({ rows, companies, busy, canEdit, open }) {
   const [company, setCompany] = useState("all");
   const visible =
     company === "all" ? rows : rows.filter((a) => a.company_id === company);
-  const companies = [
-    ...new Map(
-      rows.filter((a) => a.companies).map((a) => [a.company_id, a.companies]),
-    ).entries(),
-  ];
   return (
     <>
       <PageHead
         tag="TEAM INTELLIGENCE"
-        title="Agent directory"
-        desc="A governed source of truth for every AI agent your team builds and operates."
+        title="Agents & skillsets"
+        desc="A governed source of truth for the AI agents and reusable skillsets your team builds."
         action={
           canEdit && (
             <button className="primary" onClick={open}>
-              ＋ Add agent
+              ＋ Add agent or skillset
             </button>
           )
         }
       />
       <div className="filterbar">
         <label>
-          Company
+          Agents by company
           <select value={company} onChange={(e) => setCompany(e.target.value)}>
             <option value="all">All companies</option>
-            {companies.map(([id, c]) => (
-              <option key={id} value={id}>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>
                 {c.name}
               </option>
             ))}
@@ -711,13 +635,11 @@ function Agents({ rows, busy, canEdit, open }) {
       </div>
       <Stats
         values={[
-          [visible.length, "Total agents"],
-          [visible.filter((x) => x.status === "live").length, "Production"],
+          [visible.length, "Total entries"],
+          [visible.filter((x) => x.entry_type === "skillset").length, "Skillsets"],
           [
-            visible.filter(
-              (x) => x.status === "review" || x.status === "pending",
-            ).length,
-            "Awaiting approval",
+            visible.filter((x) => x.governance_flagged).length,
+            "Governance flags",
           ],
           [
             visible.length
@@ -731,12 +653,12 @@ function Agents({ rows, busy, canEdit, open }) {
         <Loading />
       ) : visible.length === 0 ? (
         <Empty
-          title="No agents found"
-          text="Add an agent or select a different company."
+          title="No agents or skillsets found"
+          text="Add an entry or select a different company."
           action={
             canEdit && (
               <button className="primary" onClick={open}>
-                Add agent
+                Add agent or skillset
               </button>
             )
           }
@@ -746,7 +668,8 @@ function Agents({ rows, busy, canEdit, open }) {
           <table>
             <thead>
               <tr>
-                <th>Agent</th>
+                <th>Entry</th>
+                <th>Type</th>
                 <th>Company</th>
                 <th>Owner</th>
                 <th>Runs on</th>
@@ -763,6 +686,7 @@ function Agents({ rows, busy, canEdit, open }) {
                     <b>{a.name}</b>
                     <small>{a.description}</small>
                   </td>
+                  <td>{a.entry_type || "agent"}</td>
                   <td>{a.companies?.name || "Unassigned"}</td>
                   <td>{a.owner_name || "—"}</td>
                   <td>
@@ -772,9 +696,7 @@ function Agents({ rows, busy, canEdit, open }) {
                   <td>
                     <Pill text={a.status} />
                   </td>
-                  <td>
-                    <Pill text={a.risk_level} />
-                  </td>
+                  <td>{a.governance_flagged ? <span className="risk-flag">⚑ {a.risk_level} risk</span> : <span className="governance-cleared">✓ Cleared</span>}</td>
                   <td>
                     {a.governance_score ?? "—"}
                     {a.governance_score != null && "%"}
@@ -814,7 +736,7 @@ function Requests({
     <>
       <PageHead
         tag="STAGE 0 · REQUIREMENTS"
-        title="Agent requests"
+        title="Agent Requests"
         desc="Define the need, assess technical impact, assign reviewers, and authorize work before development begins."
         action={
           <button className="primary" onClick={open}>
@@ -1232,65 +1154,113 @@ function RequestForm({ user, companies, close, saved }) {
     </div>
   );
 }
-function AgentForm({ user, requests, close, saved }) {
-  const authorized = requests.filter((r) => r.status === "build_authorized");
+function AgentForm({ user, companies, close, saved }) {
   const [form, setForm] = useState({
-      request_id: "",
+      entry_type: "agent",
+      company_id: "",
+      name: "",
+      description: "",
+      owner_name: "",
+      category: "",
+      department: "",
+      skills_summary: "",
       platform: "Claude",
       environment: "",
       url: "",
       prompt: "",
+      uses_database: false,
+      uses_api: false,
+      uses_sensitive_data: false,
+      crosses_departments: false,
     }),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [checking, setChecking] = useState(false);
   function set(k, v) {
     setForm({ ...form, [k]: v });
   }
   async function submit(e) {
     e.preventDefault();
-    const req = authorized.find((r) => r.id === form.request_id);
-    if (!req) return setError("Select an approved request.");
+    setError("");
+    setChecking(true);
+    let assessment;
+    try {
+      const response = await fetch("/api/governance-check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Governance check failed.");
+      assessment = result;
+    } catch (err) {
+      setChecking(false);
+      return setError(
+        err.message || "The governance assessment could not be completed.",
+      );
+    }
     const { data, error: e1 } = await supabase
       .from("agents")
       .insert({
-        request_id: req.id,
-        name: req.proposed_name,
-        company_id: req.company_id,
-        description: req.desired_outcome,
-        owner_name:
-          req.proposed_owner || req.requester?.full_name || "Pending owner",
+        entry_type: form.entry_type,
+        company_id: form.company_id,
+        name: form.name,
+        description: form.description,
+        owner_name: form.owner_name,
+        category: form.category || null,
+        department: form.department || null,
+        skills_summary: form.skills_summary || null,
         platform: form.platform,
         environment: form.environment,
         url: form.url || null,
-        agent_scope: req.agent_scope,
-        category: req.category,
-        department: req.department,
-        uses_database: req.uses_database,
-        uses_api: req.uses_api,
-        uses_sensitive_data: req.uses_sensitive_data,
-        crosses_departments: req.crosses_departments,
-        technical_review_required: req.technical_review_required,
-        routing_notes: req.requester_notes,
+        uses_database: form.uses_database,
+        uses_api: form.uses_api,
+        uses_sensitive_data: form.uses_sensitive_data,
+        crosses_departments: form.crosses_departments,
+        risk_level: assessment.risk_level,
+        governance_score: assessment.governance_score,
+        governance_flagged: assessment.flagged,
+        governance_summary: assessment.summary,
+        governance_checked_at: new Date().toISOString(),
+        governance_provider: assessment.provider,
+        status: assessment.flagged ? "pending" : "approved",
         created_by: user.id,
       })
       .select()
       .single();
-    if (e1) return setError(e1.message);
-    const { error: e2 } = await supabase
+    if (e1) {
+      setChecking(false);
+      return setError(e1.message);
+    }
+    const { data: version, error: e2 } = await supabase
       .from("prompt_versions")
       .insert({
         agent_id: data.id,
         version_number: 1,
         prompt_text: form.prompt,
-        change_explanation:
-          "Initial prompt created from approved requirements.",
-        status: "pending",
+        change_explanation: "Initial prompt evaluated by AI governance.",
+        status: assessment.flagged ? "pending" : "approved",
         created_by: user.id,
-      });
-    if (e2) return setError(e2.message);
-    await supabase
-      .from("agent_requests")
-      .update({ status: "built" })
-      .eq("id", req.id);
+      })
+      .select()
+      .single();
+    if (e2) {
+      setChecking(false);
+      return setError(e2.message);
+    }
+    if (assessment.checks?.length) {
+      await supabase.from("governance_reviews").insert(
+        assessment.checks.map((check) => ({
+          agent_id: data.id,
+          prompt_version_id: version.id,
+          category: check.category,
+          score: check.score,
+          status: check.status,
+          findings: check.findings,
+          reviewer_id: user.id,
+        })),
+      );
+    }
+    setChecking(false);
     saved();
   }
   return (
@@ -1298,27 +1268,61 @@ function AgentForm({ user, requests, close, saved }) {
       <form className="modal compact" onSubmit={submit}>
         <header>
           <div>
-            <small>AUTHORIZED BUILD</small>
-            <h2>Create agent record</h2>
+            <small>OPEN CREATION · GOVERNANCE MONITORED</small>
+            <h2>Add an agent or skillset</h2>
           </div>
           <button type="button" onClick={close}>
             ×
           </button>
         </header>
         <label>
-          Approved request
+          Entry type
+          <select
+            value={form.entry_type}
+            onChange={(e) => set("entry_type", e.target.value)}
+          >
+            <option value="agent">Agent</option>
+            <option value="skillset">Skillset</option>
+          </select>
+        </label>
+        <label>
+          Company
           <select
             required
-            value={form.request_id}
-            onChange={(e) => set("request_id", e.target.value)}
+            value={form.company_id}
+            onChange={(e) => set("company_id", e.target.value)}
           >
-            <option value="">Select authorized request</option>
-            {authorized.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.proposed_name}
+            <option value="">Select company</option>
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          Name
+          <input required value={form.name} onChange={(e) => set("name", e.target.value)} />
+        </label>
+        <label>
+          Accountable owner
+          <input required value={form.owner_name} onChange={(e) => set("owner_name", e.target.value)} />
+        </label>
+        <label>
+          Department
+          <input value={form.department} onChange={(e) => set("department", e.target.value)} />
+        </label>
+        <label>
+          Category
+          <input value={form.category} onChange={(e) => set("category", e.target.value)} />
+        </label>
+        <label className="full">
+          Purpose and description
+          <textarea required value={form.description} onChange={(e) => set("description", e.target.value)} />
+        </label>
+        <label className="full">
+          Capabilities or skills
+          <textarea value={form.skills_summary} onChange={(e) => set("skills_summary", e.target.value)} />
         </label>
         <label>
           Platform
@@ -1341,13 +1345,31 @@ function AgentForm({ user, requests, close, saved }) {
           />
         </label>
         <label>
-          Agent URL
+          URL
           <input
             value={form.url}
             onChange={(e) => set("url", e.target.value)}
           />
         </label>
-        <label>
+        <fieldset className="full governance-inputs">
+          <legend>Technical and data considerations</legend>
+          {[
+            ["uses_database", "Uses a database"],
+            ["uses_api", "Uses APIs or integrations"],
+            ["uses_sensitive_data", "Uses sensitive or regulated data"],
+            ["crosses_departments", "Affects multiple departments"],
+          ].map(([key, label]) => (
+            <label key={key}>
+              <input
+                type="checkbox"
+                checked={form[key]}
+                onChange={(e) => set(key, e.target.checked)}
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+        <label className="full">
           Initial prompt
           <textarea
             required
@@ -1355,18 +1377,13 @@ function AgentForm({ user, requests, close, saved }) {
             onChange={(e) => set("prompt", e.target.value)}
           />
         </label>
-        {authorized.length === 0 && (
-          <div className="message">
-            No requests are authorized for build yet.
-          </div>
-        )}
         {error && <div className="message">{error}</div>}
         <footer>
           <button type="button" onClick={close}>
             Cancel
           </button>
-          <button className="primary" disabled={!authorized.length}>
-            Create from approved request
+          <button className="primary" disabled={checking}>
+            {checking ? "Running governance check…" : "Check governance & create"}
           </button>
         </footer>
       </form>
@@ -1425,38 +1442,39 @@ function Approvals({ rows, busy, admin, approve }) {
   );
 }
 function Governance({ agents }) {
+  const flagged = agents.filter((agent) => agent.governance_flagged);
   return (
     <>
       <PageHead
         tag="RESPONSIBLE AI"
         title="AI governance"
-        desc="Consistent controls for safe, fair, transparent, and accountable agents."
+        desc="Automated screening across fairness, privacy, accuracy, safety, transparency, and security. Only meaningful risk is flagged."
       />
-      <div className="governance">
-        {checks.map((c, i) => (
-          <article key={c}>
-            <span>0{i + 1}</span>
-            <h3>{c}</h3>
-            <p>
-              {
-                [
-                  "Test for stereotypes, proxies, and uneven outcomes.",
-                  "Minimize sensitive data and define retention.",
-                  "Require sources, uncertainty labels, and verification.",
-                  "Set boundaries, escalation paths, and human review.",
-                  "Disclose AI use, limitations, and material changes.",
-                  "Use least privilege and keep secrets out of prompts.",
-                ][i]
-              }
-            </p>
-            <b>
-              {agents.length
-                ? "Portfolio review enabled"
-                : "Ready when agents are added"}
-            </b>
-          </article>
-        ))}
-      </div>
+      {flagged.length === 0 ? (
+        <Empty
+          title="No governance risks flagged"
+          text="Registered agents and skillsets have either cleared the automated assessment or have not yet been evaluated."
+        />
+      ) : (
+        <div className="governance-flags">
+          {flagged.map((agent) => (
+            <article key={agent.id}>
+              <header>
+                <div>
+                  <small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned"}</small>
+                  <h2>{agent.name}</h2>
+                </div>
+                <span className="risk-flag">⚑ {agent.risk_level} risk</span>
+              </header>
+              <p>{agent.governance_summary}</p>
+              <footer>
+                <b>Governance score: {agent.governance_score ?? "—"}</b>
+                <span>{agent.governance_provider || "Automated assessment"}</span>
+              </footer>
+            </article>
+          ))}
+        </div>
+      )}
       <section className="standard">
         <h2>Lead Ventures agent standard</h2>
         <div>
@@ -1586,26 +1604,33 @@ function CompanyForm({ user, close, saved }) {
   );
 }
 function Users({ rows, companies, admin, reload }) {
+  const [message, setMessage] = useState("");
   async function update(id, changes) {
-    await supabase.from("profiles").update(changes).eq("id", id);
-    reload();
+    setMessage("");
+    const { error } = await supabase.from("profiles").update(changes).eq("id", id);
+    if (error) setMessage(error.message);
+    else {
+      setMessage("Access updated.");
+      reload();
+    }
   }
   return (
     <>
       <PageHead
         tag="ADMINISTRATION"
-        title="Users & workflow controls"
-        desc="Assign company access, application roles, review-routing authority, and approval authority."
+        title="Users & access"
+        desc="Admin-only controls for company assignment and Admin, Editor, or Viewer access."
       />
+      {message && <div className="admin-message">{message}</div>}
       {!admin ? (
         <Empty
           title="Administrator access required"
-          text="Only administrators can change workflow authority."
+          text="Only administrators can view and change user access."
         />
       ) : rows.length === 0 ? (
         <Empty
           title="No team members found"
-          text="Invite users from Supabase Authentication, then manage their access here."
+          text="No access profiles are available. Run the user-profile synchronization migration, then refresh this page."
         />
       ) : (
         <div className="table">
@@ -1615,8 +1640,6 @@ function Users({ rows, companies, admin, reload }) {
                 <th>User</th>
                 <th>Company</th>
                 <th>Role</th>
-                <th>Can assign reviews</th>
-                <th>Can approve agents</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -1651,34 +1674,6 @@ function Users({ rows, companies, admin, reload }) {
                       <option value="editor">Editor</option>
                       <option value="viewer">Viewer</option>
                     </select>
-                  </td>
-                  <td>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={u.role === "admin" || !!u.can_assign_reviews}
-                        disabled={u.role === "admin"}
-                        onChange={(e) =>
-                          update(u.id, { can_assign_reviews: e.target.checked })
-                        }
-                      />
-                      <span>
-                        {u.role === "admin" ? "Admin" : "Coordinator"}
-                      </span>
-                    </label>
-                  </td>
-                  <td>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={u.role === "admin" || !!u.can_approve_agents}
-                        disabled={u.role === "admin"}
-                        onChange={(e) =>
-                          update(u.id, { can_approve_agents: e.target.checked })
-                        }
-                      />
-                      <span>{u.role === "admin" ? "Admin" : "Approver"}</span>
-                    </label>
                   </td>
                   <td>
                     <Pill text={u.status} />
@@ -1763,49 +1758,43 @@ function Tour({ role, setView, close }) {
     {
       view: "dashboard",
       eyebrow: "WELCOME",
-      title: "Your governed agent portfolio",
-      text: "The dashboard summarizes agents, companies, accountable owners, risk, approvals, and governance across Lead Ventures.",
-    },
-    {
-      view: "requests",
-      eyebrow: "BEFORE DEVELOPMENT",
-      title: "Start with an agent request",
-      text: "Document the business need, intended users, current process, success measures, data, integrations, scope, and affected areas before anyone begins building.",
-    },
-    {
-      view: "requests",
-      eyebrow: "ADAPTIVE ROUTING",
-      title: "Route the right reviews",
-      text: "Individual requests can follow a lighter path. Database, API, sensitive-data, enterprise, or cross-department requests are flagged for technical and multi-owner review.",
+      title: "Build boldly. Govern intelligently.",
+      text: "The dashboard summarizes agents, skillsets, companies, accountable owners, and meaningful governance risk across Lead Ventures.",
     },
     {
       view: "agents",
-      eyebrow: "AUTHORIZED BUILD",
-      title: "Create only from approved requirements",
+      eyebrow: "OPEN CREATION",
+      title: "Create agents and skillsets",
       text:
         role === "viewer"
-          ? "You can inspect agents and trace their approved requirements."
-          : "The Add agent form only accepts requests that completed all required reviews and received build authorization.",
-    },
-    {
-      view: "approvals",
-      eyebrow: "CONTROLLED RELEASES",
-      title: "Approve material prompt changes",
-      text: "Prompt changes remain separate from pre-build authorization and require independent production approval.",
+          ? "You can inspect registered agents, skillsets, ownership, and governance status."
+          : "Editors and Admins can register their own agents and reusable skillsets without a pre-build approval step.",
     },
     {
       view: "governance",
-      eyebrow: "RESPONSIBLE AI",
-      title: "Review governance controls",
-      text: "Evaluate fairness, privacy, accuracy, safety, transparency, and security before an agent reaches production.",
+      eyebrow: "AUTOMATED GOVERNANCE",
+      title: "Screen every new entry",
+      text: "A secure AI assessment checks fairness, privacy, accuracy, safety, transparency, and security. Only medium, high, or critical risk is flagged for review.",
+    },
+    {
+      view: "approvals",
+      eyebrow: "RISK-BASED REVIEW",
+      title: "Review only what needs attention",
+      text: "Low-risk entries are cleared automatically. Flagged entries and later material prompt changes appear for Admin review.",
     },
     ...(role === "admin"
       ? [
           {
+            view: "companies",
+            eyebrow: "TENANT MANAGEMENT",
+            title: "Add Lead Ventures companies",
+            text: "Create each company under the Lead Ventures tenant. Agents, skillsets, and users can then be assigned and filtered by company.",
+          },
+          {
             view: "users",
-            eyebrow: "WORKFLOW AUTHORITY",
-            title: "Configure coordinators and approvers",
-            text: "Allow Eli or others to assign reviews, designate Sean, Danielle, and impacted-area owners as approvers, and retain Admin oversight.",
+            eyebrow: "ADMIN VIEW",
+            title: "Manage users and access",
+            text: "Only Admins see the user-access area. Assign each person to a company and change their role to Admin, Editor, or Viewer.",
           },
         ]
       : []),
@@ -1813,7 +1802,7 @@ function Tour({ role, setView, close }) {
       view: "dashboard",
       eyebrow: "PERSONAL APPEARANCE",
       title: "Choose the workspace style you prefer",
-      text: "Use the Appearance menu in the header to switch between Lead Ventures Current and Light Professional. Your choice applies only to this browser.",
+      text: "Use the Appearance menu in the header to switch between Dark and Light. Your choice applies only to this browser.",
     },
     {
       view: "dashboard",
