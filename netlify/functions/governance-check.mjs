@@ -1,5 +1,5 @@
 const categories = ["Fairness & bias", "Privacy & data", "Accuracy & grounding", "Safety & oversight", "Transparency", "Security"];
-const system = "You are an enterprise AI governance reviewer. Assess only evidence in the submitted repository resource. Do not invent risks. Low risk stays low. Medium, high, or critical risk requires a concrete actionable finding. Return JSON only with risk_level, governance_score, summary, and exactly six checks. Each check must contain category, score, status (passed, attention, or failed), and findings.";
+const system = "You are an enterprise AI governance reviewer. Assess only evidence in the submitted repository resource. Do not invent risks. Low risk stays low. Medium, high, or critical risk requires a concrete actionable finding. Return JSON only with risk_level, governance_score, summary, and exactly six checks. risk_level must be exactly one lowercase value: low, medium, high, or critical. governance_score must be an integer from 0 through 100. Each check must contain category, score, status (passed, attention, or failed), and findings.";
 
 async function getSettings() {
   const base = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -47,10 +47,19 @@ async function callGemini(entry, model) {
   return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
 }
 
-function validate(result) {
-  if (!["low", "medium", "high", "critical"].includes(result.risk_level)) throw new Error("The provider returned an invalid risk level.");
-  if (!Number.isInteger(result.governance_score) || result.governance_score < 0 || result.governance_score > 100) throw new Error("The provider returned an invalid governance score.");
+export function validate(result) {
+  const normalizedRisk = String(result?.risk_level || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]*risk$/, "")
+    .trim();
+  if (!["low", "medium", "high", "critical"].includes(normalizedRisk))
+    throw new Error(`The provider returned an unsupported risk level${result?.risk_level ? ` (${String(result.risk_level).slice(0, 40)})` : ""}. Please try again.`);
+  const normalizedScore = Number(result.governance_score);
+  if (!Number.isInteger(normalizedScore) || normalizedScore < 0 || normalizedScore > 100) throw new Error("The provider returned an invalid governance score. Please try again.");
   if (!Array.isArray(result.checks) || result.checks.length !== 6) throw new Error("The provider returned incomplete governance checks.");
+  result.risk_level = normalizedRisk;
+  result.governance_score = normalizedScore;
   result.checks = categories.map((category) => {
     const found = result.checks.find((x) => x.category === category) || {};
     return { category, score: Math.max(0, Math.min(100, Number(found.score) || 0)), status: ["passed", "attention", "failed"].includes(found.status) ? found.status : "attention", findings: found.findings || "Review recommended." };
