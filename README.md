@@ -38,7 +38,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, `013`, `014`, `015`, and `016` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
+3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, `013`, `014`, `015`, `016`, and `017` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -102,6 +102,7 @@ If you already ran the original schema, run these migrations in order in the Sup
 11. `supabase/migrations/014_governance_workflow_and_prompt_reviews.sql`
 12. `supabase/migrations/015_deterministic_governance_and_advisory.sql`
 13. `supabase/migrations/016_likert_risk_scoring_and_threshold.sql`
+14. `supabase/migrations/017_directory_preferences_and_governance_followup.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing resources and users can then be assigned to the appropriate company. Company assignment supports organization and filtering; it does not restrict resource access unless an Admin explicitly chooses **Selected Companies**. The directory includes a company dropdown, including companies that do not yet have a resource.
 
@@ -128,6 +129,8 @@ Migration 014 introduces the durable governance workflow and auditable prompt-re
 Migration 015 replaces provider-dependent submission screening with the official deterministic Governance Readiness Assessment. It preserves every assessment version, category score, answer and explanation, initial risk, final risk, mandatory override, clarification, Admin decision, optional AI advisory, and remediation item. It also adds owner-response and Admin-only decision policies. Run it once after migration 014; do not rerun `schema.sql`.
 
 Migration 016 introduces the employee-facing, plain-language Likert assessment and changes the official score to risk points, where higher percentages mean greater risk. It adds a configurable future-assessment review threshold, stores the threshold and score direction with each assessment, and keeps previous decisions unchanged. Run it once after migration 015.
+
+Migration 017 stores per-user Directory columns with a local-storage fallback, owner assessment drafts, requests and deadlines for current owner-completed Governance Checks, and issue-focused review records. It adds indexes, owner/Admin RLS, an Admin-only request function, and automatically closes a pending owner request when the current Likert assessment is submitted. Run it once after migration 016.
 
 Resource submissions are always saved. Stronger governance controls produce fewer risk points: Strongly Agree = 0, Agree = 25, Not Sure = 50, Disagree = 75, and Strongly Disagree = 100. A justified Not Applicable response is excluded. Category risk is calculated before weights are applied. Scores of 0–19 are Low, 20–39 Moderate-Low, 40–59 Medium, 60–79 High, and 80–100 Critical. The default Admin-review threshold is 40%; Admins may change it under **Admin → AI & Governance Settings** for future assessments. Missing information produces **Assessment Pending**, and mandatory safeguards trigger review independently of the score.
 
@@ -172,5 +175,11 @@ Each user can choose **Dark** or **Light** from the Appearance menu. The prefere
 The official assessment evaluates Privacy and Data, Safety and Human Oversight, Security, Fairness, Accuracy, and Transparency and Accountability without calling an external provider. Four context questions reveal only relevant statements. Every statement includes plain-language help and a labeled Likert scale. The browser calculates the result for immediate feedback, and the database independently verifies it before recording the official version. The same responses, assessment version, and threshold always produce the same result. Mandatory override reasons are stored separately from the numeric risk score.
 
 The Admin governance queue contains only current assessments at or above their stored review threshold, mandatory overrides, incomplete assessments, manual clarification flags, and reassessments requiring attention. Automatically cleared resources appear only in the separate searchable assessment history, which is an audit view rather than an approval queue.
+
+Resource registration and editing use four steps: **Resource Information**, **Access Management**, **Governance Check**, and **Review & Submit**. The accountable owner completes the initial Governance Check; an Admin assigning another person as owner leaves the assessment pending and can send it to that owner with a response deadline. Resources created under an earlier questionnaire retain their historical records and display as **Legacy** until the owner submits the current assessment. Every resource is saved before routing.
+
+The AI Governance page lists only unresolved **Items Requiring Attention**, such as material owner responses, missing explanations, mandatory overrides, Admin-added issues, and optional AI advisory concerns. It does not ask Admins to repeat the full owner questionnaire. AI assistance remains optional, Admin-initiated, advisory, and limited to resources already requiring review.
+
+The Directory **Columns** menu controls which table fields are rendered. Resource is always visible; the default view also includes Type, Company, Owner, Status, Risk, and Actions. Preferences are saved to the user profile when migration 017 is installed and fall back to browser storage. Descriptions are limited to three lines with a complete details view, while small screens use resource cards instead of compressing the desktop table.
 
 Only an active Admin can click **Run AI-Assisted Assessment** for a flagged resource. The server sends sanitized repository metadata and deterministic evidence to the configured provider, validates the structured response, and stores an immutable advisory plus editable remediation tasks. It never updates the official score, final risk, publication status, or access. With no matching server-side API key, the button is disabled and the application displays: “AI-assisted assessment is not configured. The deterministic governance assessment remains available.” Never expose provider keys through a `VITE_` variable.

@@ -1,14 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase, configured } from "./supabase";
-import { ASSESSMENT_VERSION, DEFAULT_REVIEW_THRESHOLD, GOVERNANCE_CATEGORIES, LIKERT_OPTIONS, OVERRIDE_QUESTIONS, TRIGGER_QUESTIONS, evaluateGovernance, initialQuestionnaire, riskLabel, visibleStatements } from "./governance";
-const checks = [
-  "Fairness & bias",
-  "Privacy & data",
-  "Accuracy & grounding",
-  "Safety & oversight",
-  "Transparency",
-  "Security",
-];
+import { ASSESSMENT_VERSION, DEFAULT_REVIEW_THRESHOLD, GOVERNANCE_CATEGORIES, LIKERT_OPTIONS, OVERRIDE_QUESTIONS, TRIGGER_QUESTIONS, evaluateGovernance, initialQuestionnaire, riskBand, riskLabel, visibleStatements } from "./governance";
 export default function App() {
   const [session, setSession] = useState(null),
     [profile, setProfile] = useState(null),
@@ -264,6 +256,7 @@ function Registry({ session, profile }) {
     [clarifications, setClarifications] = useState([]),
     [advisories, setAdvisories] = useState([]),
     [recommendations, setRecommendations] = useState([]),
+    [savedAttentionItems, setSavedAttentionItems] = useState([]),
     [appSettings, setAppSettings] = useState({}),
     [assessmentResult, setAssessmentResult] = useState(null),
     [busy, setBusy] = useState(true),
@@ -285,7 +278,7 @@ function Registry({ session, profile }) {
   const adminViews = ["users", "companies", "taxonomy", "access", "settings"];
   async function load() {
     setBusy(true);
-    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, settings] = await Promise.all([
+    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, attention, settings] = await Promise.all([
       supabase
         .from("agents")
         .select("*,companies(name)")
@@ -311,6 +304,7 @@ function Registry({ session, profile }) {
       supabase.from("governance_clarifications").select("*").order("created_at", { ascending: false }),
       supabase.from("ai_advisory_assessments").select("*").order("created_at", { ascending: false }),
       supabase.from("governance_recommendations").select("*").order("created_at", { ascending: false }),
+      supabase.from("governance_attention_items").select("*").order("created_at", { ascending: false }),
       supabase.from("app_settings").select("setting_key,setting_value"),
     ]);
     const details = pd.data || [];
@@ -333,6 +327,7 @@ function Registry({ session, profile }) {
     setClarifications(gc.data || []);
     setAdvisories(aa.data || []);
     setRecommendations(gr.data || []);
+    setSavedAttentionItems(attention.data || []);
     setAppSettings(Object.fromEntries((settings.data || []).map((item) => [item.setting_key, item.setting_value])));
     setBusy(false);
   }
@@ -342,6 +337,11 @@ function Registry({ session, profile }) {
   useEffect(() => {
     localStorage.setItem("lv-agent-theme", theme);
   }, [theme]);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(""), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
   useEffect(() => {
     if (!admin && adminViews.includes(view)) setView("dashboard");
     if (admin && adminViews.includes(view)) setAdminOpen(true);
@@ -362,10 +362,7 @@ function Registry({ session, profile }) {
       await load();
     } catch (error) {
       console.error("Prompt review failed", error);
-      setToast(
-        error.message ||
-          "We could not record this review decision. Please confirm that you have Admin approval access and try again.",
-      );
+      setToast("We could not record this review decision. Please confirm that you have Admin approval access and try again.");
     }
   }
   async function retryAssessment(agent) {
@@ -439,7 +436,8 @@ function Registry({ session, profile }) {
       );
       await load();
     } catch (error) {
-      setToast(error.message);
+      console.error("Resource management action failed", error);
+      setToast("We could not update this resource. Confirm your Admin access and try again.");
     }
   }
   const nav = [
@@ -579,6 +577,7 @@ function Registry({ session, profile }) {
           <Agents
             rows={agents}
             companies={companies}
+            userId={session.user.id}
             busy={busy}
             canEdit={canEdit}
             admin={admin}
@@ -601,7 +600,7 @@ function Registry({ session, profile }) {
             approve={approvePrompt}
           />
         )}{" "}
-        {view === "governance" && <Governance agents={agents} assessments={assessments} clarifications={clarifications} advisories={advisories} recommendations={recommendations} admin={admin} user={session.user} token={session.access_token} reload={load} notify={setToast} edit={(agent) => { setEditingAgent(agent); setModal(true); }} />}{" "}
+        {view === "governance" && <Governance agents={agents} assessments={assessments} clarifications={clarifications} advisories={advisories} recommendations={recommendations} attentionItems={savedAttentionItems} admin={admin} user={session.user} token={session.access_token} reload={load} notify={setToast} edit={(agent) => { setEditingAgent(agent); setModal(true); }} />}{" "}
         {admin && view === "companies" && (
           <Companies
             rows={companies}
@@ -965,7 +964,58 @@ function ResourceFilter({ label, value, onChange, options }) {
     </label>
   );
 }
-function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage }) {
+const DIRECTORY_COLUMNS = [
+  ["resource", "Resource"], ["type", "Type"], ["company", "Company"], ["owner", "Owner"],
+  ["department", "Department"], ["category", "Category"], ["runsOn", "Runs On"], ["status", "Status"],
+  ["risk", "Risk"], ["governance", "Governance"], ["access", "Access"], ["accessInstructions", "Access Instructions"],
+  ["url", "URL"], ["actions", "Actions"],
+];
+const DEFAULT_DIRECTORY_COLUMNS = ["resource", "type", "company", "owner", "status", "risk", "actions"];
+function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, userId }) {
+  const preferenceKey = `lv-directory-columns:${userId}`;
+  const [company, setCompany] = useState("all"), [status, setStatus] = useState("active"), [columnsOpen, setColumnsOpen] = useState(false), [details, setDetails] = useState(null);
+  const [columns, setColumns] = useState(() => { try { const saved = JSON.parse(localStorage.getItem(preferenceKey)); return Array.isArray(saved) ? ["resource", ...saved.filter((key) => key !== "resource" && DIRECTORY_COLUMNS.some(([id]) => id === key))] : DEFAULT_DIRECTORY_COLUMNS; } catch { return DEFAULT_DIRECTORY_COLUMNS; } });
+  const [draftColumns, setDraftColumns] = useState(columns);
+  useEffect(() => {
+    let active = true;
+    supabase.from("user_preferences").select("preference_value").eq("user_id", userId).eq("preference_key", "directory_columns").maybeSingle().then(({ data }) => {
+      if (!active || !Array.isArray(data?.preference_value)) return;
+      const saved = ["resource", ...data.preference_value.filter((key) => key !== "resource" && DIRECTORY_COLUMNS.some(([id]) => id === key))];
+      setColumns(saved); setDraftColumns(saved); localStorage.setItem(preferenceKey, JSON.stringify(saved));
+    });
+    return () => { active = false; };
+  }, [preferenceKey, userId]);
+  const visible = rows.filter((agent) => (company === "all" || agent.company_id === company) && (status === "all" || (status === "archived" ? agent.status === "retired" : agent.status !== "retired")));
+  const shown = (key) => columns.includes(key);
+  const risk = (agent) => agent.governance_score == null ? "Pending" : riskLabel(riskBand(agent.governance_score));
+  function applyColumns() { const next = ["resource", ...draftColumns.filter((key) => key !== "resource")]; setColumns(next); localStorage.setItem(preferenceKey, JSON.stringify(next)); setColumnsOpen(false); supabase.from("user_preferences").upsert({ user_id: userId, preference_key: "directory_columns", preference_value: next, updated_at: new Date().toISOString() }).then(({ error }) => { if (error) console.info("Directory preference stored locally until the profile preference migration is available."); }); }
+  function remove(agent) { if (window.confirm(`Permanently delete ${agent.name}? Its prompt versions and governance history will also be deleted. This cannot be undone.`)) manage(agent.id, "delete"); }
+  const cell = (key, agent) => ({
+    resource: <><b>{agent.name}</b><p className="resource-description">{agent.description}</p><button className="details-link" onClick={() => setDetails(agent)}>View Details</button></>,
+    type: agent.entry_type || "agent", company: agent.companies?.name || "Unassigned", owner: agent.owner_name || "—",
+    department: agent.department || "—", category: agent.category || "—",
+    runsOn: <>{agent.entry_type === "platform" ? agent.platform_details?.vendor || agent.platform || "—" : agent.platform || "—"}<small>{agent.environment}</small></>,
+    status: <Pill text={agent.status}/>, risk: agent.governance_score == null ? "Pending" : `${risk(agent)} · ${agent.governance_score}%`,
+    governance: <Pill text={agent.governance_flagged ? "review" : "approved"}/>, access: ACCESS_SCOPE_LABELS[agent.access_scope] || "Admins Only",
+    accessInstructions: agent.entry_type === "platform" ? agent.platform_details?.access_request_instructions || "Contact the designated administrator." : "—",
+    url: agent.url ? <a href={agent.url} target="_blank" rel="noreferrer">Open ↗</a> : "—",
+    actions: <div className="directory-actions"><button onClick={() => setDetails(agent)}>View</button>{canEdit && <button onClick={() => edit(agent)}>Edit</button>}{agent.url && <a href={agent.url} target="_blank" rel="noreferrer">Open ↗</a>}{admin && <details className="action-menu"><summary>More</summary><div><button onClick={() => manage(agent.id, agent.status === "retired" ? "restore" : "archive")}>{agent.status === "retired" ? "Restore" : "Archive"}</button><button className="danger" onClick={() => remove(agent)}>Delete</button></div></details>}</div>,
+  })[key];
+  return <>
+    <PageHead tag="TEAM INTELLIGENCE" title="Agents & Platform Directory" desc="The governed source of truth for AI agents, reusable skillsets, and approved platforms." action={canEdit && <button className="primary" onClick={open}>＋ Add resource</button>}/>
+    <div className="filterbar directory-filterbar"><label>Agents by Company<select value={company} onChange={(e) => setCompany(e.target.value)}><option value="all">All companies</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Archive status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">Active entries</option><option value="archived">Archived entries</option><option value="all">All entries</option></select></label><div className="column-selector"><button aria-expanded={columnsOpen} onClick={() => { setDraftColumns(columns); setColumnsOpen((current) => !current); }}>Columns</button>{columnsOpen && <div className="column-popover"><b>Visible columns</b>{DIRECTORY_COLUMNS.map(([id, label]) => <label key={id}><input type="checkbox" disabled={id === "resource"} checked={id === "resource" || draftColumns.includes(id)} onChange={(e) => setDraftColumns((current) => e.target.checked ? [...current, id] : current.filter((key) => key !== id))}/>{label}{id === "resource" && <small>Required</small>}</label>)}<footer><button onClick={() => setDraftColumns(DIRECTORY_COLUMNS.map(([id]) => id))}>Select All</button><button onClick={() => setDraftColumns(DEFAULT_DIRECTORY_COLUMNS)}>Reset to Default</button><button className="primary" onClick={applyColumns}>Apply</button></footer></div>}</div></div>
+    <Stats values={[[visible.length,"Total resources"],[visible.filter((item) => item.entry_type === "platform").length,"Platforms"],[visible.filter((item) => item.entry_type === "skillset").length,"Skillsets"],[visible.filter((item) => item.governance_flagged).length,"Governance flags"],[visible.length ? `${Math.round(visible.reduce((sum,item) => sum+(item.governance_score||0),0)/visible.length)}%` : "—","Average governance risk"]]}/>
+    {busy ? <Loading/> : visible.length === 0 ? <Empty title="No resources found" text="Add an entry or select a different company." action={canEdit && <button className="primary" onClick={open}>Add resource</button>}/> : <>
+      <div className="directory-table-wrapper"><table className="resource-directory-table"><thead><tr>{DIRECTORY_COLUMNS.filter(([key]) => shown(key)).map(([key,label]) => <th key={key} className={`${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}-column`}>{label}</th>)}</tr></thead><tbody>{visible.map((agent) => <tr key={agent.id}>{DIRECTORY_COLUMNS.filter(([key]) => shown(key)).map(([key]) => <td key={key} className={`${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}-column`}>{cell(key,agent)}</td>)}</tr>)}</tbody></table></div>
+      <div className="directory-mobile-cards">{visible.map((agent) => <article key={agent.id}><h2>{agent.name}</h2><dl><div><dt>Type</dt><dd>{agent.entry_type || "agent"}</dd></div><div><dt>Company</dt><dd>{agent.companies?.name || "Unassigned"}</dd></div><div><dt>Owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${risk(agent)} · ${agent.governance_score}%`}</dd></div></dl><footer><button onClick={() => setDetails(agent)}>View Details</button>{agent.url && <a href={agent.url} target="_blank" rel="noreferrer">Open ↗</a>}{canEdit && <button onClick={() => edit(agent)}>Edit</button>}{admin && <button onClick={() => manage(agent.id,agent.status === "retired" ? "restore" : "archive")}>{agent.status === "retired" ? "Restore" : "Archive"}</button>}{admin && <button className="danger" onClick={() => remove(agent)}>Delete</button>}</footer></article>)}</div>
+    </>}
+    {details && <ResourceDetails agent={details} close={() => setDetails(null)} edit={canEdit ? edit : null} />}
+  </>;
+}
+function ResourceDetails({ agent, close, edit }) {
+  return <div className="backdrop"><section className="modal compact resource-details" role="dialog" aria-modal="true" aria-labelledby="resource-details-title"><header><div><small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned"}</small><h2 id="resource-details-title">{agent.name}</h2></div><button onClick={close}>×</button></header><dl><div><dt>Description</dt><dd>{agent.description || "—"}</dd></div><div><dt>Owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Department</dt><dd>{agent.department || "—"}</dd></div><div><dt>Category</dt><dd>{agent.category || "—"}</dd></div><div><dt>Runs on</dt><dd>{agent.platform || "—"} · {agent.environment || "—"}</dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Governance Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${riskLabel(riskBand(agent.governance_score))} · ${agent.governance_score}%`}</dd></div><div><dt>Access</dt><dd>{ACCESS_SCOPE_LABELS[agent.access_scope] || "Admins Only"}</dd></div><div><dt>Capabilities</dt><dd>{agent.skills_summary || "—"}</dd></div></dl><footer>{agent.url && <a href={agent.url} target="_blank" rel="noreferrer">Open resource ↗</a>}{edit && <button className="primary" onClick={() => { close(); edit(agent); }}>Edit resource</button>}<button onClick={close}>Close</button></footer></section></div>;
+}
+function LegacyAgents({ rows, companies, busy, canEdit, admin, open, edit, manage }) {
   const [company, setCompany] = useState("all"),
     [status, setStatus] = useState("active");
   const visible = rows.filter(
@@ -1860,7 +1910,9 @@ function AgentForm({
     [authorizedCompanies, setAuthorizedCompanies] = useState(
       companyAccess.map((assignment) => assignment.company_id),
     ),
+    [step, setStep] = useState(1),
     [questionnaire, setQuestionnaire] = useState(() => initialQuestionnaire(assessment?.responses || {}, { accountable_owner_id: agent?.accountable_owner_id || currentUser.id }));
+  const canCompleteGovernance = !admin || form.accountable_owner_id === currentUser.id;
   function set(k, v) {
     setForm((current) => ({ ...current, [k]: v }));
   }
@@ -1875,8 +1927,11 @@ function AgentForm({
   async function submit(e) {
     e.preventDefault();
     setError("");
+    if (!form.company_id || !form.name.trim() || !form.description.trim() || !form.department.trim() || !form.category.trim() || !form.environment.trim()) { setStep(1); return setError("Complete the required Resource Information fields before submitting."); }
+    if (form.entry_type === "platform" && (!form.vendor.trim() || !form.access_request_instructions.trim())) { setStep(1); return setError("Complete the required Platform details before submitting."); }
+    if (!form.prompt.trim()) { setStep(4); return setError("Add the current initial prompt before submitting."); }
     const ownerName = form.owner_name === "Other" ? customOwner.trim() : form.owner_name.trim();
-    if (!ownerName) return setError("Select or enter an accountable owner.");
+    if (!ownerName) { setStep(1); return setError("Select or enter an accountable owner."); }
     const submission = { ...form, owner_name: ownerName };
     const deterministic = evaluateGovernance(questionnaire, { accountable_owner_id: form.accountable_owner_id || (!admin ? user.id : null) }, reviewThreshold);
     setChecking(true);
@@ -2082,6 +2137,10 @@ function AgentForm({
             ×
           </button>
         </header>
+        <nav className="form-steps" aria-label="Resource registration steps">
+          {["Resource Information", "Access Management", "Governance Check", "Review & Submit"].map((label, index) => <button key={label} type="button" className={step === index + 1 ? "active" : ""} aria-current={step === index + 1 ? "step" : undefined} onClick={() => setStep(index + 1)}><span>{index + 1}</span>{label}</button>)}
+        </nav>
+        {step === 1 && <>
         <label>
           Resource Type
           <FieldHelp>Select whether you are registering an AI agent, a reusable skillset, or an AI platform available to the organization.</FieldHelp>
@@ -2318,6 +2377,10 @@ function AgentForm({
             <p className="field-help full">Availability in this repository does not automatically create a license or user account in the external platform. Follow the listed access instructions or contact the designated administrator.</p>
           </fieldset>
         )}
+        </>}
+        {step === 3 && <>
+        {!canCompleteGovernance && <div className="full governance-owner-note"><b>Governance Check must be completed by the accountable owner.</b><p>Admins may assign an owner and save the resource, but must not answer the owner’s initial assessment. The resource will be saved as Assessment Pending.</p></div>}
+        {canCompleteGovernance && <>
         <fieldset className="full context-questions">
           <legend>Tell us how this resource will operate</legend>
           <p>Tell us how this resource will operate. Select the response that best describes it. You do not need to be a technology or governance expert. Choose “Not Sure” when you need assistance.</p>
@@ -2342,6 +2405,9 @@ function AgentForm({
           </section>
           <p className="questionnaire-note">Incomplete answers never prevent saving. Higher percentages mean greater governance risk. The current Admin-review threshold is {reviewThreshold}%.</p>
         </fieldset>
+        </>}
+        </>}
+        {step === 2 && <>
         <fieldset className="full access-management-fields">
           <legend>Access Management</legend>
           <p className="field-help">
@@ -2442,6 +2508,8 @@ function AgentForm({
             Access granted in this repository does not automatically configure permissions in the external AI platform. Confirm external platform access separately.
           </p>
         </fieldset>
+        </>}
+        {step === 4 && <>
         <label className="full">
           Initial prompt
           <FieldHelp>Enter the current system instructions or primary prompt. Do not include passwords, API keys, confidential customer information, or other secrets.</FieldHelp>
@@ -2451,18 +2519,26 @@ function AgentForm({
             onChange={(e) => set("prompt", e.target.value)}
           />
         </label>
+        <section className="full review-summary">
+          <h3>Review before submitting</h3>
+          <dl><div><dt>Resource</dt><dd>{form.name || "Not provided"}</dd></div><div><dt>Type</dt><dd>{form.entry_type}</dd></div><div><dt>Company</dt><dd>{companies.find((company) => company.id === form.company_id)?.name || "Not selected"}</dd></div><div><dt>Owner</dt><dd>{form.owner_name || "Not selected"}</dd></div><div><dt>Access</dt><dd>{ACCESS_SCOPE_LABELS[form.access_scope] || "Owner Only"}</dd></div><div><dt>Governance Check</dt><dd>{canCompleteGovernance ? "Owner responses will be scored deterministically" : "Assessment Pending — send to owner"}</dd></div></dl>
+          <p>Every resource is saved. Resources at or above {reviewThreshold}% risk, or with a mandatory override, are routed to Admin review.</p>
+        </section>
+        </>}
         {error && <div className="message">{error}</div>}
         <footer>
           <button type="button" onClick={close}>
             Cancel
           </button>
-          <button className="primary" disabled={checking}>
+          {step > 1 && <button type="button" onClick={() => setStep((current) => current - 1)}>Back</button>}
+          {step < 4 && <button type="button" className="primary" onClick={() => setStep((current) => current + 1)}>Continue</button>}
+          {step === 4 && <button className="primary" disabled={checking}>
             {checking
               ? "Saving and assessing…"
               : agent
                 ? "Save & assess"
                 : "Save resource & assess"}
-          </button>
+          </button>}
         </footer>
       </form>
     </div>
@@ -2526,15 +2602,20 @@ function ApprovalCard({ version, admin, approve }) {
     </article>
   );
 }
+function LikertScale({ name, label, value, disabled = false, onChange }) {
+  return <>
+    <div className="likert-scale" role="radiogroup" aria-label={label}>
+      {LIKERT_OPTIONS.slice(0, 5).map((option) => <label className={value === option.value ? "selected" : ""} key={option.value}><input type="radio" name={name} value={option.value} disabled={disabled} checked={value === option.value} aria-checked={value === option.value} onChange={(event) => onChange(event.target.value)}/><span>{option.value}</span><b aria-hidden="true">{value === option.value ? "✓" : "○"}</b></label>)}
+    </div>
+    {!disabled && <label className={`not-applicable-option ${value === "Not Applicable" ? "selected" : ""}`}><input type="radio" name={name} value="Not Applicable" checked={value === "Not Applicable"} aria-checked={value === "Not Applicable"} onChange={(event) => onChange(event.target.value)}/><span>Not Applicable</span><b aria-hidden="true">{value === "Not Applicable" ? "✓ Selected" : "○"}</b></label>}
+  </>;
+}
 function QuestionnaireField({ statement, value = {}, change }) {
   const explanationRequired = ["Not Sure", "Disagree", "Strongly Disagree", "Not Applicable"].includes(value.answer);
   return (
     <div className={`likert-statement ${statement.automatic ? "automatic" : ""}`}>
       <div><b>{statement.label}</b><p>{statement.help}</p>{statement.automatic && <small>Automatically confirmed from repository records</small>}</div>
-      <div className="likert-scale" role="radiogroup" aria-label={statement.label}>
-        {LIKERT_OPTIONS.slice(0, 5).map((option) => <label key={option.value}><input type="radio" name={statement.id} value={option.value} disabled={Boolean(statement.automatic)} checked={value.answer === option.value} onChange={(e) => change(statement.id, "answer", e.target.value)}/><span>{option.value}</span></label>)}
-      </div>
-      {!statement.automatic && <label className="not-applicable-option"><input type="radio" name={statement.id} value="Not Applicable" checked={value.answer === "Not Applicable"} onChange={(e) => change(statement.id, "answer", e.target.value)}/>Not Applicable</label>}
+      <LikertScale name={statement.id} label={statement.label} value={value.answer} disabled={Boolean(statement.automatic)} onChange={(answer) => change(statement.id, "answer", answer)} />
       {(explanationRequired || value.explanation) && (
         <label className="likert-explanation">Please briefly explain your response so the Admin can understand what assistance or follow-up may be needed. {explanationRequired && <span>(required)</span>}
           <textarea value={value.explanation || ""} onChange={(e) => change(statement.id, "explanation", e.target.value)} />
@@ -2556,7 +2637,7 @@ function AssessmentResult({ result, close }) {
     <footer><button className="primary" onClick={close}>Done</button></footer>
   </section></div>;
 }
-function Governance({ agents, assessments, clarifications, advisories, recommendations, admin, user, token, reload, notify, edit }) {
+function Governance({ agents, assessments, clarifications, advisories, recommendations, attentionItems, admin, user, token, reload, notify, edit }) {
   const [ai, setAi] = useState({ loading: true, configured: false });
   const [historySearch, setHistorySearch] = useState("");
   useEffect(() => {
@@ -2569,42 +2650,85 @@ function Governance({ agents, assessments, clarifications, advisories, recommend
   const latest = assessments.filter((item, index, all) => all.findIndex((candidate) => candidate.agent_id === item.agent_id) === index);
   const queue = agents.filter((agent) => {
     const item = latest.find((candidate) => candidate.agent_id === agent.id);
-    return agent.manual_governance_flag || ["assessment_pending", "governance_review", "clarification_requested", "changes_requested"].includes(item?.review_status || agent.governance_status);
+    return !item || item.assessment_version !== ASSESSMENT_VERSION || agent.manual_governance_flag || ["assessment_pending", "governance_review", "clarification_requested", "changes_requested"].includes(item?.review_status || agent.governance_status);
   });
   async function requireReassessment(agentId) {
     const { error } = await supabase.rpc("request_governance_reassessment", { target_agent: agentId });
-    if (error) return notify(error.message);
+    if (error) return notify("We could not request reassessment. Confirm your Admin access and try again.");
     notify("The resource was added to the governance queue for reassessment.");
     await reload();
   }
   return <>
     <PageHead tag="RESPONSIBLE AI" title="AI Governance" desc="Deterministic readiness scoring, mandatory overrides, Admin review, clarification, and advisory remediation. AI never changes the official result." />
     {admin && !ai.loading && !ai.configured && <div className="admin-message">AI-assisted assessment is not configured. The deterministic governance assessment remains available.</div>}
-    {queue.length === 0 ? <Empty title="Governance queue is clear" text="No medium, high, critical, pending, or manually flagged resources currently require review." /> : <div className="governance-flags">{queue.map((agent) => <GovernanceCard key={agent.id} agent={agent} assessment={latest.find((item) => item.agent_id === agent.id)} history={assessments.filter((item) => item.agent_id === agent.id)} clarifications={clarifications.filter((item) => item.agent_id === agent.id)} advisories={advisories.filter((item) => item.agent_id === agent.id)} recommendations={recommendations.filter((item) => item.agent_id === agent.id)} admin={admin} user={user} token={token} ai={ai} reload={reload} notify={notify} edit={edit} />)}</div>}
+    {queue.length === 0 ? <Empty title="Governance queue is clear" text="No medium, high, critical, pending, or manually flagged resources currently require review." /> : <div className="governance-flags">{queue.map((agent) => <GovernanceCard key={agent.id} agent={agent} assessment={latest.find((item) => item.agent_id === agent.id)} history={assessments.filter((item) => item.agent_id === agent.id)} clarifications={clarifications.filter((item) => item.agent_id === agent.id)} advisories={advisories.filter((item) => item.agent_id === agent.id)} recommendations={recommendations.filter((item) => item.agent_id === agent.id)} savedAttentionItems={attentionItems.filter((item) => item.agent_id === agent.id)} admin={admin} user={user} token={token} ai={ai} reload={reload} notify={notify} edit={edit} />)}</div>}
     {admin && <section className="assessment-history"><header><div><small>AUDIT, NOT AN APPROVAL QUEUE</small><h2>Assessment history</h2></div><input type="search" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search resources or owners"/></header><div className="table embedded"><table><thead><tr><th>Resource</th><th>Owner</th><th>Assessment</th><th>Risk score</th><th>Risk level</th><th>Threshold used</th><th>Outcome</th><th>Date</th><th>Audit action</th></tr></thead><tbody>{assessments.filter((item) => { const agent = agents.find((candidate) => candidate.id === item.agent_id); return `${agent?.name || ""} ${agent?.owner_name || ""}`.toLowerCase().includes(historySearch.toLowerCase()); }).map((item) => { const agent = agents.find((candidate) => candidate.id === item.agent_id); const isLatest = latest.some((candidate) => candidate.id === item.id); return <tr key={item.id}><td><b>{agent?.name || "Deleted resource"}</b></td><td>{agent?.owner_name || "—"}</td><td>{item.assessment_version} · v{item.assessment_number}</td><td>{item.overall_score}%</td><td>{riskLabel(item.risk_band || (item.overall_score < 20 ? "low" : item.overall_score < 40 ? "moderate_low" : item.final_risk))}</td><td>{item.review_threshold ?? "Legacy"}</td><td><Pill text={item.review_status}/></td><td>{new Date(item.assessed_at).toLocaleDateString()}</td><td>{isLatest && item.review_status === "cleared" && !agent?.manual_governance_flag ? <button onClick={() => requireReassessment(item.agent_id)}>Require reassessment</button> : "—"}</td></tr>; })}</tbody></table></div></section>}
     <section className="standard"><h2>Lead Ventures Resource Standard</h2><div>{["Clear approved purpose","Named accountable owner","Human review for high-impact decisions","Grounded outputs and uncertainty labels","Representative bias evaluation","Data minimization and retention rules","Failure, escalation, and rollback plan","Quarterly access review"].map((item) => <span key={item}>✓ {item}</span>)}</div></section>
   </>;
 }
-function GovernanceCard({ agent, assessment, history, clarifications, advisories, recommendations, admin, user, token, ai, reload, notify, edit }) {
+function governanceAttentionItems(assessment, advisories = [], savedItems = []) {
+  if (!assessment) return [];
+  const statements = GOVERNANCE_CATEGORIES.flatMap((category) => category.statements.map((statement) => ({ ...statement, category: category.label })));
+  const points = Object.fromEntries(LIKERT_OPTIONS.map((option) => [option.value, option.points]));
+  const responses = assessment.responses || {};
+  const items = statements.flatMap((statement) => {
+    const response = responses[statement.id] || {};
+    const contribution = points[response.answer];
+    const explanationMissing = ["Strongly Disagree", "Disagree", "Not Sure", "Not Applicable"].includes(response.answer) && !response.explanation?.trim();
+    const material = ["Strongly Disagree", "Disagree", "Not Sure"].includes(response.answer) || contribution >= 50 || explanationMissing;
+    if (!material) return [];
+    return [{ id: statement.id, category: statement.category, statement: statement.label, response: response.answer || "Missing", explanation: response.explanation || "No explanation provided", points: response.answer === "Not Applicable" ? "Excluded only with valid justification" : `${contribution ?? 0} points`, action: explanationMissing ? "Ask the owner to provide the required explanation or justification." : "Ask the owner to document or strengthen this safeguard." }];
+  });
+  (assessment.missing_information || []).forEach((id) => {
+    const baseId = id.replace(":explanation", ""), statement = statements.find((item) => item.id === baseId);
+    if (!items.some((item) => item.id === id)) items.push({ id, category: statement?.category || "Assessment", statement: statement?.label || "Required governance information", response: responses[baseId]?.answer || "Missing", explanation: responses[baseId]?.explanation || "No explanation provided", points: "Pending", action: "Ask the owner to complete the missing information." });
+  });
+  (assessment.mandatory_overrides || []).forEach((override) => items.push({ id: `override:${override.id}`, category: "Mandatory override", statement: override.reason, response: "Override triggered", explanation: override.evidence || "", points: `Minimum ${riskLabel(override.minimum_risk)} Risk`, action: "Resolve the safeguard gap or document the Admin decision." }));
+  advisories.flatMap((item) => item.output?.concerns || []).forEach((concern, index) => items.push({ id: `ai:${index}`, category: "AI-assisted analysis", statement: typeof concern === "string" ? concern : concern.concern || JSON.stringify(concern), response: "Advisory", explanation: "AI-identified issue; Admin verification required.", points: "Does not affect deterministic score", action: "Review the evidence and decide whether owner clarification is needed." }));
+  savedItems.filter((item) => item.status !== "resolved").forEach((item) => items.push({ id: `saved:${item.id}`, category: item.category || "Admin issue", statement: item.statement, response: item.owner_response || "Awaiting owner response", explanation: item.owner_explanation || "No owner explanation recorded", points: item.risk_points == null ? "Admin-added issue" : `${item.risk_points} points`, action: item.recommended_action || "Respond to the Admin’s clarification request." }));
+  return items;
+}
+function GovernanceCard({ agent, assessment, history, clarifications, advisories, recommendations, savedAttentionItems, admin, user, token, ai, reload, notify, edit }) {
   const [form, setForm] = useState({ notes: "", conditions: "", clarification: "", deadline: "" });
-  const [selectedQuestions, setSelectedQuestions] = useState(() => (assessment?.missing_information || []).map((item) => item.replace(":explanation", "")));
+  const attentionItems = governanceAttentionItems(assessment, advisories, savedAttentionItems);
+  const [selectedQuestions, setSelectedQuestions] = useState(() => governanceAttentionItems(assessment, advisories, savedAttentionItems).map((item) => item.id));
+  const [customQuestion, setCustomQuestion] = useState("");
   const [busy, setBusy] = useState(false);
+  const legacy = !assessment || assessment.assessment_version !== ASSESSMENT_VERSION;
+  const decisionAllowed = assessment && ["governance_review", "clarification_requested", "changes_requested"].includes(assessment.review_status);
+  const changesAllowed = assessment && ["governance_review", "clarification_requested", "changes_requested", "assessment_pending"].includes(assessment.review_status);
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   async function decide(decision) {
     if (!assessment) return notify("Complete the deterministic assessment before recording a decision.");
+    if (decision === "approved_with_conditions" && !form.conditions.trim() && !form.notes.trim()) return notify("Add approval conditions or Admin notes before approving with conditions.");
+    if (["request_changes", "rejected", "accepted_residual_risk"].includes(decision) && !form.notes.trim()) return notify("Add Admin notes before recording this decision.");
     setBusy(true);
     const { error } = await supabase.rpc("decide_governance_assessment", { target_assessment: assessment.id, target_decision: decision, decision_notes: form.notes || null, decision_conditions: form.conditions || null });
     setBusy(false);
-    if (error) return notify(error.message.includes("own resource") ? "Resource authors cannot approve their own resource. A different Admin must record approval." : error.message);
+    if (error) return notify(error.message.includes("own resource") ? "Resource authors cannot approve their own resource. A different Admin must record approval." : "We could not record this governance decision. Confirm your Admin access and try again.");
     notify("Governance decision recorded in the audit history."); await reload();
   }
   async function requestClarification() {
-    if (!assessment || !form.clarification.trim() || selectedQuestions.length === 0) return notify("Select at least one question and add clarification instructions.");
+    if (!assessment || !form.clarification.trim() || (!selectedQuestions.length && !customQuestion.trim())) return notify("Select at least one issue or add a custom question, then add clarification instructions.");
     setBusy(true);
-    const { error } = await supabase.from("governance_clarifications").insert({ assessment_id: assessment.id, agent_id: agent.id, requested_by: user.id, question_ids: [...new Set(selectedQuestions)], instructions: form.clarification.trim(), due_at: form.deadline ? `${form.deadline}T23:59:59.999Z` : null });
+    const questionIds = [...new Set(selectedQuestions)];
+    if (customQuestion.trim()) {
+      const { data: customItem, error: customError } = await supabase.from("governance_attention_items").insert({ assessment_id: assessment.id, agent_id: agent.id, source: "admin", category: "Admin clarification", statement: customQuestion.trim(), recommended_action: form.clarification.trim(), status: "clarification_requested", created_by: user.id }).select("id").single();
+      if (customError) { setBusy(false); return notify("We could not save the custom clarification issue. Confirm migration 017 is installed and try again."); }
+      questionIds.push(`custom:${customItem.id}`);
+    }
+    const { error } = await supabase.from("governance_clarifications").insert({ assessment_id: assessment.id, agent_id: agent.id, requested_by: user.id, question_ids: questionIds, instructions: form.clarification.trim(), due_at: form.deadline ? `${form.deadline}T23:59:59.999Z` : null });
     setBusy(false);
-    if (error) return notify(error.message);
+    if (error) return notify("We could not send the clarification request. Confirm your Admin access and try again.");
     notify("Clarification request sent to the accountable owner."); await reload();
+  }
+  async function sendOwnerCheck() {
+    if (!agent.accountable_owner_id) return notify("Assign an accountable owner before sending the Governance Check.");
+    setBusy(true);
+    const { error } = await supabase.rpc("request_owner_governance_check", { target_agent: agent.id, target_due_at: form.deadline ? `${form.deadline}T23:59:59.999Z` : null });
+    setBusy(false);
+    if (error) return notify("We could not send the Governance Check. Confirm the migration is installed and try again.");
+    notify("Governance Check sent to the accountable owner."); await reload();
   }
   async function runAI() {
     setBusy(true);
@@ -2612,7 +2736,7 @@ function GovernanceCard({ agent, assessment, history, clarifications, advisories
       const response = await fetch("/api/ai-advisory", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ assessmentId: assessment?.id }) });
       const result = await response.json(); if (!response.ok) throw new Error(result.error);
       notify("AI advisory saved. The official score, risk, and publication status were not changed."); await reload();
-    } catch (error) { notify(error.message); } finally { setBusy(false); }
+    } catch (error) { console.error("AI advisory failed", error); notify("The optional AI-assisted assessment could not be completed. Confirm its configuration and try again."); } finally { setBusy(false); }
   }
   return <article>
     <header><div><small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned company"} · assessment v{assessment?.assessment_number || "—"}</small><h2>{agent.name}</h2></div><span className="risk-flag">⚑ {riskLabel(assessment?.risk_band || assessment?.final_risk)} Risk</span></header>
@@ -2622,12 +2746,17 @@ function GovernanceCard({ agent, assessment, history, clarifications, advisories
     {advisories.length > 0 && <details open><summary>AI advisory history ({advisories.length})</summary>{advisories.map((item) => <Advisory key={item.id} item={item} recommendations={recommendations.filter((recommendation) => recommendation.advisory_id === item.id)} admin={admin} reload={reload} notify={notify} />)}</details>}
     {history.length > 1 && <details><summary>Assessment history ({history.length})</summary>{history.map((item) => <div className="history-item" key={item.id}>v{item.assessment_number} · {item.overall_score}% · {item.final_risk} · {new Date(item.assessed_at).toLocaleString()}</div>)}</details>}
     {agent.manual_governance_flag && <div className="reassessment-notice"><b>Reassessment requested</b><span>Open the resource, confirm the current answers, and save a new assessment version.</span><button className="primary" onClick={() => edit(agent)}>Reassess resource</button></div>}
-    {admin ? <div className="governance-actions"><label>Admin notes<textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} /></label><label>Approval conditions<textarea value={form.conditions} onChange={(e) => set("conditions", e.target.value)} /></label><div className="clarification-question-picker"><b>Questions requiring clarification</b>{GOVERNANCE_CATEGORIES.flatMap((category) => category.statements).map((statement) => <label key={statement.id}><input type="checkbox" checked={selectedQuestions.includes(statement.id)} onChange={(e) => setSelectedQuestions((current) => e.target.checked ? [...current, statement.id] : current.filter((item) => item !== statement.id))}/>{statement.label}</label>)}</div><label>Clarification instructions<textarea value={form.clarification} onChange={(e) => set("clarification", e.target.value)} /></label><label>Response deadline<input type="date" value={form.deadline} onChange={(e) => set("deadline", e.target.value)} /></label><div><button disabled={busy} onClick={requestClarification}>Request Clarification</button><button disabled={busy || !ai.configured || !assessment} onClick={runAI}>Run AI-Assisted Assessment</button><button disabled={busy} onClick={() => decide("request_changes")}>Request Changes</button><button disabled={busy} onClick={() => decide("rejected")}>Reject</button><button disabled={busy} onClick={() => decide("accepted_residual_risk")}>Accept Residual Risk</button><button disabled={busy} onClick={() => decide("approved_with_conditions")}>Approve With Conditions</button><button className="primary" disabled={busy} onClick={() => decide("approved")}>Approve</button></div>{!ai.loading && !ai.configured && <p className="field-help">AI-assisted assessment is not configured. The deterministic governance assessment remains available.</p>}</div> : clarifications.filter((item) => item.status === "open").map((item) => <OwnerClarification key={item.id} item={item} user={user} reload={reload} notify={notify} />)}
+    {admin ? <div className="governance-actions">
+      {legacy ? <section className="legacy-governance"><h3>Current Governance Check Required</h3><p>This resource was created before the current governance assessment. Send the Governance Check to the accountable owner to establish its current risk score.</p><label>Response deadline<input type="date" value={form.deadline} onChange={(e) => set("deadline", e.target.value)} /></label><div>{!agent.accountable_owner_id && <button onClick={() => edit(agent)}>Assign Owner</button>}<button className="primary" disabled={busy || !agent.accountable_owner_id} onClick={sendOwnerCheck}>Send Governance Check to Owner</button><details><summary>View Historical Governance Information</summary>{history.length ? history.map((item) => <p key={item.id}>{item.assessment_version || "Legacy"} · {item.overall_score ?? "—"}% · {new Date(item.assessed_at).toLocaleString()}</p>) : <p>No historical assessment record is available.</p>}</details></div></section> : <>
+      <label>Admin notes<textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} /></label><label>Approval conditions<textarea value={form.conditions} onChange={(e) => set("conditions", e.target.value)} /></label>
+      <section className="attention-items"><h3>Items Requiring Attention</h3>{attentionItems.length ? attentionItems.map((item) => <article key={item.id}><label className="attention-selector"><input type="checkbox" checked={selectedQuestions.includes(item.id)} onChange={(event) => setSelectedQuestions((current) => event.target.checked ? [...new Set([...current, item.id])] : current.filter((id) => id !== item.id))}/><span>Request Clarification</span></label><small>{item.category}</small><h4>{item.statement}</h4><dl><div><dt>Owner response</dt><dd>{item.response}</dd></div><div><dt>Owner explanation</dt><dd>{item.explanation}</dd></div><div><dt>Risk contribution</dt><dd>{item.points}</dd></div><div><dt>Required or recommended action</dt><dd>{item.action}</dd></div></dl></article>) : <p>No clarification is currently required.</p>}</section>
+      <label>Add a custom clarification question<input value={customQuestion} onChange={(event) => setCustomQuestion(event.target.value)} placeholder="Ask about a specific unresolved concern" /></label><label>Clarification instructions<textarea value={form.clarification} onChange={(e) => set("clarification", e.target.value)} /></label><label>Response deadline<input type="date" value={form.deadline} onChange={(e) => set("deadline", e.target.value)} /></label><div><button disabled={busy || !changesAllowed || (!selectedQuestions.length && !customQuestion.trim())} onClick={requestClarification}>Request Clarification</button><button disabled={busy || !ai.configured || !assessment || !agent.governance_flagged} onClick={runAI}>Run AI-Assisted Assessment</button><button disabled={busy || !changesAllowed} onClick={() => decide("request_changes")}>Request Changes</button><button disabled={busy || !decisionAllowed} onClick={() => decide("rejected")}>Reject</button><button disabled={busy || !decisionAllowed} onClick={() => decide("accepted_residual_risk")}>Accept Residual Risk</button><button disabled={busy || !decisionAllowed} onClick={() => decide("approved_with_conditions")}>Approve With Conditions</button><button className="primary" disabled={busy || !decisionAllowed} onClick={() => decide("approved")}>Approve</button></div>{!ai.loading && !ai.configured && <p className="field-help">AI-assisted assessment is not configured. This optional advisory action does not affect the deterministic score or prevent saving.</p>}</>}
+    </div> : clarifications.filter((item) => item.status === "open").map((item) => <OwnerClarification key={item.id} item={item} user={user} reload={reload} notify={notify} />)}
   </article>;
 }
 function OwnerClarification({ item, user, reload, notify }) {
   const [response, setResponse] = useState("");
-  async function send() { const { error } = await supabase.rpc("respond_governance_clarification", { target_clarification: item.id, target_response: response }); if (error) return notify(error.message); notify("Clarification response sent."); await reload(); }
+  async function send() { const { error } = await supabase.rpc("respond_governance_clarification", { target_clarification: item.id, target_response: response }); if (error) return notify("We could not send your clarification response. Confirm that you are the accountable owner and try again."); notify("Clarification response sent."); await reload(); }
   return <div className="clarification-response"><b>{item.instructions}</b>{item.due_at && <small>Due {new Date(item.due_at).toLocaleDateString()}</small>}<textarea value={response} onChange={(e) => setResponse(e.target.value)} placeholder="Provide evidence and context."/><button className="primary" onClick={send}>Send response</button></div>;
 }
 function Advisory({ item, recommendations, admin, reload, notify }) {
@@ -2637,7 +2766,7 @@ function Advisory({ item, recommendations, admin, reload, notify }) {
 function Remediation({ item, admin, reload, notify }) {
   const [form, setForm] = useState({ owner_decision: item.owner_decision || "", owner_response: item.owner_response || "", action_owner: item.action_owner || "", target_date: item.target_date || "", status: item.status, evidence: item.evidence || "", admin_notes: item.admin_notes || "" });
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  async function save(verify = false) { const { error } = await supabase.rpc("update_governance_recommendation", { target_recommendation: item.id, target_owner_decision: form.owner_decision || null, target_owner_response: form.owner_response || null, target_action_owner: form.action_owner || null, target_due_date: form.target_date || null, target_status: form.status, target_evidence: form.evidence || null, target_admin_notes: admin ? form.admin_notes || null : null, target_verify: Boolean(admin && verify) }); if (error) return notify(error.message); notify(verify ? "Recommendation verified and closed by Admin." : "Remediation item updated."); await reload(); }
+  async function save(verify = false) { const { error } = await supabase.rpc("update_governance_recommendation", { target_recommendation: item.id, target_owner_decision: form.owner_decision || null, target_owner_response: form.owner_response || null, target_action_owner: form.action_owner || null, target_due_date: form.target_date || null, target_status: form.status, target_evidence: form.evidence || null, target_admin_notes: admin ? form.admin_notes || null : null, target_verify: Boolean(admin && verify) }); if (error) return notify("We could not update this remediation item. Confirm your access and try again."); notify(verify ? "Recommendation verified and closed by Admin." : "Remediation item updated."); await reload(); }
   return <div className="recommendation"><header><b>{item.priority}</b><span>{item.category} · {item.plan_phase}</span></header><h4>{item.concern}</h4><p>{item.recommended_action}</p><small>{item.impact} · Evidence: {item.evidence_required || "Not specified"} · Expected improvement: {item.expected_score_improvement || 0} points</small><div><select value={form.owner_decision} onChange={(e) => set("owner_decision", e.target.value)}><option value="">Accept or dispute</option><option value="accepted">Accept</option><option value="disputed">Dispute</option></select><select value={form.status} onChange={(e) => set("status", e.target.value)}>{["Not Started","In Progress","Completed","Accepted Risk","Not Applicable","Awaiting Verification"].map((status) => <option key={status}>{status}</option>)}</select><input value={form.action_owner} onChange={(e) => set("action_owner", e.target.value)} placeholder="Action owner"/><input type="date" value={form.target_date} onChange={(e) => set("target_date", e.target.value)}/><textarea value={form.owner_response} onChange={(e) => set("owner_response", e.target.value)} placeholder="Owner response"/><textarea value={form.evidence} onChange={(e) => set("evidence", e.target.value)} placeholder="Evidence or link"/>{admin && <textarea value={form.admin_notes} onChange={(e) => set("admin_notes", e.target.value)} placeholder="Admin verification or residual-risk note"/>}<button onClick={() => save(false)}>Save remediation</button>{admin && <button className="primary" onClick={() => save(true)}>Verify & close</button>}</div></div>;
 }
 function LegacyGovernance({ agents, admin, review, retry }) {
@@ -3310,19 +3439,19 @@ function Tour({ role, setView, close }) {
       view: "agents",
       eyebrow: "SOURCE OF TRUTH",
       title: "Agents & Platform Directory",
-      text: "Use the directory as the governed source of truth for agents, reusable skillsets, approved platforms, accountable ownership, access, and governance details.",
+      text: "Use Columns to choose the fields shown in your directory; the preference follows your user profile with a browser fallback. Resource descriptions stay compact, and mobile screens use cards with the essential actions.",
     },
     {
       view: "governance",
       eyebrow: "DETERMINISTIC GOVERNANCE",
       title: "Score every resource consistently",
-      text: "Resource owners complete a plain-language assessment. Higher percentages mean greater risk. Scores below the Admin threshold clear automatically unless a mandatory safeguard or missing information requires review.",
+      text: "Resource owners complete the Governance Check using plain-language Likert statements. Higher percentages mean greater risk. The default review threshold is 40%, every resource is saved, and only elevated-risk exceptions go to Admin review. Legacy resources must be sent to their owner for a current assessment.",
     },
     {
       view: "approvals",
       eyebrow: "RISK-BASED REVIEW",
       title: "Review only what needs attention",
-      text: "Low-risk entries clear automatically. Admins can request clarification, approve with conditions, request changes, reject, or optionally run an AI advisory with tracked remediation. AI never changes the official result.",
+      text: "Admins see only unresolved Items Requiring Attention, can request clarification, and can record valid review decisions. Optional AI assistance is Admin-initiated and advisory; it never changes the official deterministic result.",
     },
     ...(role === "admin"
       ? [
