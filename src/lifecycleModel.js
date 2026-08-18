@@ -4,6 +4,14 @@ import { compareResources } from "./duplicates.js";
 export const CONNECTION_TYPES = ["next", "feedback", "conditional", "nested", "supporting"];
 export const MAPPING_RELATIONSHIPS = ["performs", "supports", "automates", "provides_data", "receives_data", "planned"];
 
+export function lifecycleRouteState({ mode, isAdmin, tenantLoading = false, tenantKey, loadError, lifecycles } = {}) {
+  if (tenantLoading) return "tenant_loading";
+  if (mode === "admin" && !isAdmin) return "unauthorized";
+  if (!tenantKey) return "tenant_unavailable";
+  if (loadError) return "data_error";
+  return Array.isArray(lifecycles) && lifecycles.length ? "ready" : "empty";
+}
+
 export function normalizeLifecycleData(input = {}) {
   const list = (value) => Array.isArray(value) ? value.filter((item) => item && typeof item === "object") : [];
   const lifecycles = list(input.lifecycles).filter((item) => item.id);

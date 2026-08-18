@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { autoArrangeLifecycle, classifyLifecycleStructure, lifecycleListGroups, lifecycleSummary, validateConnection } from "../src/lifecycleModel.js";
+import { autoArrangeLifecycle, classifyLifecycleStructure, lifecycleListGroups, lifecycleRouteState, lifecycleSummary, normalizeLifecycleData, validateConnection } from "../src/lifecycleModel.js";
 
 const stages = [{id:"s1",name:"Discover",sequence:1},{id:"s2",name:"Join",sequence:2},{id:"s3",name:"Engage",sequence:3}];
 
@@ -74,4 +74,50 @@ test("admin builder exposes preview, archive, resource mapping, and accessible c
   const source=readFileSync(new URL("../src/LifecycleWorkspace.jsx",import.meta.url),"utf8");
   for(const control of ["Auto-arrange","Save draft","Preview","Publish","Accessible list","Create new version","Resource mappings"])assert.match(source,new RegExp(control));
   assert.doesNotMatch(source,/template picker|Start from|FocusQuest starter template|D9 Network starter template/);
+});
+
+test("admin route distinguishes empty, loading, missing tenant, request failure, and unauthorized states", () => {
+  const base = { mode:"admin", isAdmin:true, tenantKey:"tenant-1", lifecycles:[] };
+  assert.equal(lifecycleRouteState(base), "empty");
+  assert.equal(lifecycleRouteState({...base, tenantLoading:true}), "tenant_loading");
+  assert.equal(lifecycleRouteState({...base, tenantKey:""}), "tenant_unavailable");
+  assert.equal(lifecycleRouteState({...base, loadError:"request failed"}), "data_error");
+  assert.equal(lifecycleRouteState({...base, isAdmin:false}), "unauthorized");
+});
+
+test("authorized simple lifecycle retains its stages when it has no phases", () => {
+  const result = normalizeLifecycleData({
+    lifecycles:[{id:"l1",tenant_key:"tenant-1",description:null}],
+    phases:[],
+    stages:[{id:"s1",lifecycle_id:"l1",name:"Discover",description:null},{id:"s2",lifecycle_id:"l1",name:"Join",accountable_owner_name:null}],
+    connections:[{id:"c1",from_stage_id:"s1",to_stage_id:"s2"}],
+  });
+  assert.equal(lifecycleRouteState({mode:"admin",isAdmin:true,tenantKey:"tenant-1",lifecycles:result.lifecycles}), "ready");
+  assert.equal(result.stages.length, 2);
+  assert.equal(result.connections.length, 1);
+});
+
+test("phased lifecycle preserves phase and nested-stage hierarchy with null optional fields", () => {
+  const result = normalizeLifecycleData({
+    lifecycles:[{id:"l1",tenant_key:"tenant-1",description:null,updated_at:null}],
+    phases:[{id:"p1",lifecycle_id:"l1",name:"Acquire",objective:null}],
+    stages:[
+      {id:"parent",lifecycle_id:"l1",phase_id:"p1",name:"Outreach",activities:null},
+      {id:"child",lifecycle_id:"l1",phase_id:"p1",parent_stage_id:"parent",name:"Discovery",accountable_owner_name:null},
+    ],
+  });
+  assert.equal(result.phases[0].id, "p1");
+  assert.equal(result.stages.find((stage)=>stage.id==="child").parent_stage_id, "parent");
+  assert.equal(classifyLifecycleStructure(result.phases,result.stages,result.connections), "hybrid");
+});
+
+test("admin lifecycle route is isolated, direct-hash aware, and logs failed queries safely", () => {
+  const app=readFileSync(new URL("../src/App.jsx",import.meta.url),"utf8");
+  const boundary=readFileSync(new URL("../src/RouteErrorBoundary.jsx",import.meta.url),"utf8");
+  assert.match(app,/window\.location\.hash\.replace/);
+  assert.match(app,/lifecycles-admin/);
+  assert.match(app,/Operational lifecycle data load failed/);
+  assert.match(app,/<RouteErrorBoundary routeKey=\{view\} title="Operational Lifecycles/);
+  assert.match(boundary,/componentDidCatch/);
+  assert.match(boundary,/this\.props\.children/);
 });

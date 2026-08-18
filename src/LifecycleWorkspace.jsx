@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Background, Controls, MarkerType, MiniMap, ReactFlow, useEdgesState, useNodesState } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { supabase } from "./supabase";
-import { autoArrangeLifecycle, classifyLifecycleStructure, CONNECTION_TYPES, lifecycleListGroups, lifecycleSummary, MAPPING_RELATIONSHIPS, normalizeLifecycleData, validateConnection } from "./lifecycleModel";
+import { autoArrangeLifecycle, classifyLifecycleStructure, CONNECTION_TYPES, lifecycleListGroups, lifecycleRouteState, lifecycleSummary, MAPPING_RELATIONSHIPS, normalizeLifecycleData, validateConnection } from "./lifecycleModel";
 import { PROPRIETARY_NOTICE } from "./lifecycles";
 import "./lifecycleBuilder.css";
 
@@ -105,7 +105,11 @@ function LifecycleAdmin({ lifecycles, phases, stages, connections, mappings, vie
 }
 
 export function LifecycleExperience(props) {
-  if (props.loadError) {
+  const routeState = lifecycleRouteState(props);
+  if (routeState === "tenant_loading") return <div className="loading">Loading tenant context…</div>;
+  if (routeState === "unauthorized") return <section className="page-load-error lifecycle-load-error" role="alert"><small>ACCESS DENIED</small><h1>Administrator access is required</h1><p>Only an active tenant Admin can manage Operational Lifecycles.</p><button onClick={props.onBack}>Return to Dashboard</button></section>;
+  if (routeState === "tenant_unavailable") return <section className="page-load-error lifecycle-load-error" role="alert"><small>TENANT CONTEXT UNAVAILABLE</small><h1>Operational Lifecycles cannot be loaded yet</h1><p>Your active profile does not include a tenant identifier. Refresh your session or ask an administrator to verify your tenant assignment.</p><div><button className="primary" onClick={props.reload}>Retry</button><button onClick={props.onBack}>Return to Dashboard</button></div></section>;
+  if (routeState === "data_error") {
     const denied = /permission/i.test(props.loadError);
     return <section className="page-load-error lifecycle-load-error" role="alert"><small>{denied ? "ACCESS DENIED" : "LIFECYCLE DATA UNAVAILABLE"}</small><h1>{denied ? "You cannot view these operational lifecycles" : "Operational Lifecycles could not be loaded"}</h1><p>{props.loadError}</p><p>The Dashboard and other Hub pages remain available.</p><div><button className="primary" onClick={props.reload}>Retry</button><button onClick={props.onBack}>Return to Dashboard</button></div></section>;
   }

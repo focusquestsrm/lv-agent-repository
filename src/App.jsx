@@ -343,7 +343,10 @@ function Registry({ session, profile }) {
       supabase.from("admin_awareness_notifications").select("*").order("created_at", { ascending: false }),
     ].map(settle));
     const resourceError = a.error;
-    const lifecycleError = [lc, lp, ls, lconn, lv, lm].find((result) => result.error)?.error;
+    const lifecycleResults = [["operational_lifecycles", lc], ["lifecycle_phases", lp], ["lifecycle_stages", ls], ["lifecycle_connections", lconn], ["lifecycle_viewers", lv], ["resource_lifecycle_mappings", lm]];
+    const lifecycleFailures = lifecycleResults.filter(([, result]) => result.error);
+    const lifecycleError = lifecycleFailures[0]?.[1]?.error;
+    if (lifecycleFailures.length) console.error("Operational lifecycle data load failed", lifecycleFailures.map(([table, result]) => ({ table, code: result.error?.code || "unknown", status: result.status || null })));
     setLoadErrors({
       resources: safeDataError(resourceError, "Resources could not be refreshed."),
       companies: safeDataError(c.error, "Companies could not be refreshed."),
@@ -681,7 +684,7 @@ function Registry({ session, profile }) {
           />
         )}{" "}
         {view === "products" && <ProductSuite resources={agents} relationships={productRelationships} mappings={lifecycleMappings} companies={companies} lifecycles={lifecycles} admin={admin} open={canEdit ? () => { sessionStorage.setItem("hub-create-type", "product"); setEditingAgent(null); setModal(true); } : null} edit={canEdit ? (agent) => { setEditingAgent(agent); setModal(true); } : null} reload={load} notify={setToast} />}{" "}
-        {view === "lifecycles" && <RouteErrorBoundary routeKey={view} title="Company Lifecycles could not be displayed" onRetry={load} onBack={() => setView("dashboard")}><Lifecycles mode="viewer" isAdmin={admin} lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} loadError={loadErrors.lifecycles} onBack={() => setView("dashboard")} onCreate={() => setView("lifecycles-admin")} reload={load} notify={setToast} /></RouteErrorBoundary>}{" "}
+        {view === "lifecycles" && <RouteErrorBoundary routeKey={view} title="Company Lifecycles could not be displayed" onRetry={load} onBack={() => setView("dashboard")}><Lifecycles mode="viewer" isAdmin={admin} tenantKey={profile.tenant_key} lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} loadError={loadErrors.lifecycles} onBack={() => setView("dashboard")} onCreate={() => setView("lifecycles-admin")} reload={load} notify={setToast} /></RouteErrorBoundary>}{" "}
         {view === "compare" && <ResourceCompare resources={agents.filter((item) => item.status !== "retired")} />}{" "}
         {view === "approvals" && (
           <Approvals
@@ -732,7 +735,7 @@ function Registry({ session, profile }) {
             edit={setAccessModal}
           />
         )}
-        {admin && view === "lifecycles-admin" && <RouteErrorBoundary routeKey={view} title="Operational Lifecycles could not be displayed" onRetry={load} onBack={() => setView("dashboard")}><Lifecycles mode="admin" lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} user={session.user} token={session.access_token} loadError={loadErrors.lifecycles} onBack={() => setView("dashboard")} reload={load} notify={setToast} /></RouteErrorBoundary>}
+        {admin && view === "lifecycles-admin" && <RouteErrorBoundary routeKey={view} title="Operational Lifecycles could not be displayed" onRetry={load} onBack={() => setView("dashboard")}><Lifecycles mode="admin" isAdmin={admin} tenantKey={profile.tenant_key} lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} user={session.user} token={session.access_token} loadError={loadErrors.lifecycles} onBack={() => setView("dashboard")} reload={load} notify={setToast} /></RouteErrorBoundary>}
         {admin && view === "duplicates" && <DuplicateQueue matches={duplicateMatches} resources={agents} notify={setToast} reload={load} />}
         {admin && view === "settings" && <AISettings user={session.user} />}
       </section>

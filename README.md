@@ -14,7 +14,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 - Deterministic Start Here classification guidance without an external AI API
 - Lead Ventures Product Suite with card/table views, filters, comparisons, and a relationship map
 - Flexible database-driven linear, circular, phased, nested, and hybrid operational lifecycles
-- FocusQuest and D9 Network optional starter templates derived from the supplied references (the reference HTML is never served)
+- Direct, blank lifecycle creation informed by the supplied FocusQuest and D9 reference designs (the reference HTML is never served)
 - Lifecycle versioning, archival/restoration, safe mapped-stage deletion, access management, and graphical/list views
 - Deterministic URL/keyword duplicate detection and a separate Potential Duplicates queue
 - Company Stewardship verification, creator attribution, hosting/admin control, integrations, and review dates
@@ -47,7 +47,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. If `schema.sql` completed successfully, run migrations `006` through `024` in numeric order, except `004` and `005`. The newest Hub migrations must run in this order: `018_hub_resource_stewardship.sql`, `019_operational_lifecycles.sql`, `020_lifecycle_security_templates.sql`, `021_product_suite.sql`, `022_resource_department_access.sql`, `023_start_here_assessment_workflow.sql`, then `024_operational_lifecycle_builder.sql`.
+3. If `schema.sql` completed successfully, run migrations `006` through `025` in numeric order, except `004` and `005`. The newest Hub migrations must run in this order: `018_hub_resource_stewardship.sql`, `019_operational_lifecycles.sql`, `020_lifecycle_security_templates.sql`, `021_product_suite.sql`, `022_resource_department_access.sql`, `023_start_here_assessment_workflow.sql`, `024_operational_lifecycle_builder.sql`, then `025_resource_creator_visibility.sql`.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -119,6 +119,7 @@ If you already ran the original schema, run these migrations in order in the Sup
 19. `supabase/migrations/022_resource_department_access.sql`
 20. `supabase/migrations/023_start_here_assessment_workflow.sql`
 21. `supabase/migrations/024_operational_lifecycle_builder.sql`
+22. `supabase/migrations/025_resource_creator_visibility.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing resources and users can then be assigned to the appropriate company. Company assignment supports organization and filtering; it does not restrict resource access unless an Admin explicitly chooses **Selected Companies**. The directory includes a company dropdown, including companies that do not yet have a resource.
 
@@ -156,7 +157,7 @@ Migration 024 replaces the user-facing lifecycle-template workflow with direct l
 
 ## Operational lifecycle administration
 
-Admins can start blank or use the optional FocusQuest/D9 templates, customize phases and stages, add parent stages and feedback connections, preview the generated graph or accessible list, publish, create a new version, archive, and restore. Lifecycle access is enforced in Supabase RLS for Admins only, the entire tenant, the lifecycle company, selected departments, or selected individuals. Active Admins—including Sean and Danielle while their profiles retain that role—always have access.
+Admins start with a blank lifecycle, customize phases and stages, add parent stages and feedback connections, preview the generated graph or accessible list, publish, create a new version, archive, and restore. Lifecycle access is enforced in Supabase RLS for Admins only, the entire tenant, the lifecycle company, selected departments, or selected individuals. Active Admins—including Sean and Danielle while their profiles retain that role—always have access.
 
 The reference files under `reference/lifecycles/` are design/data-model references only. They are not copied into `dist`, routed, embedded, or served by the application.
 
