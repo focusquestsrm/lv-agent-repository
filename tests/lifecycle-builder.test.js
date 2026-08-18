@@ -125,8 +125,37 @@ test("admin lifecycle route is isolated, direct-hash aware, and logs failed quer
 test("lifecycle canvas synchronization cannot trigger a parent state update loop", () => {
   const source = readFileSync(new URL("../src/LifecycleWorkspace.jsx", import.meta.url), "utf8");
   assert.match(source, /const flowApi = useRef\(null\)/);
-  assert.match(source, /flowApi\.current=payload/);
+  assert.match(source, /flowApi\.current\s*=\s*payload/);
   assert.doesNotMatch(source, /setFlowApi\(/);
   assert.match(source, /const preparedNodes = useMemo/);
-  assert.match(source, /const scoped=useMemo/);
+  assert.match(source, /const scoped\s*=\s*useMemo/);
+});
+
+test("lifecycle tiles support selected-only resizing, saved dimensions, colors, and reset", () => {
+  const source = readFileSync(new URL("../src/LifecycleWorkspace.jsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/lifecycleBuilder.css", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../supabase/migrations/028_lifecycle_tile_appearance.sql", import.meta.url), "utf8");
+  assert.match(source, /<NodeResizer/);
+  assert.match(source, /isVisible=\{selected\}/);
+  assert.match(source, /onResizeEnd/);
+  assert.match(source, /visual_width/);
+  assert.match(source, /visual_height/);
+  assert.match(source, /Reset to default appearance/);
+  assert.match(source, /Background color/);
+  assert.match(source, /Accent and border color/);
+  assert.match(css, /\.lifecycle-resize-handle/);
+  for (const field of ["visual_width", "visual_height", "background_color", "border_color", "text_color"]) assert.match(migration, new RegExp(field));
+  assert.match(migration, /phase\.visual_width/);
+  assert.match(migration, /stage\.visual_width/);
+});
+
+test("lifecycle toolbar wraps compact controls without horizontal scrolling", () => {
+  const source = readFileSync(new URL("../src/LifecycleWorkspace.jsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/lifecycleBuilder.css", import.meta.url), "utf8");
+  assert.match(source, /toolbar-group toolbar-create/);
+  assert.match(source, /toolbar-group toolbar-save/);
+  assert.match(css, /flex-wrap: wrap/);
+  assert.match(css, /font-size: 14px/);
+  assert.match(css, /min-height: 36px/);
+  assert.doesNotMatch(css, /\.canvas-toolbar[\s\S]{0,250}overflow: auto/);
 });
