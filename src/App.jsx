@@ -516,9 +516,11 @@ function Registry({ session, profile }) {
             : `${result.agent.name} restored as a draft.`,
       );
       await load();
+      return true;
     } catch (error) {
       console.error("Resource management action failed", error);
       setToast("We could not update this resource. Confirm your Admin access and try again.");
+      return false;
     }
   }
   const nav = [
@@ -673,6 +675,12 @@ function Registry({ session, profile }) {
             focusResourceId={focusResourceId}
             clearFocus={() => setFocusResourceId("")}
             retry={load}
+            admin={admin}
+            edit={(agent) => {
+              setEditingAgent(agent);
+              setModal(true);
+            }}
+            manage={manageAgent}
           />
         )}{" "}
         {view === "agents" && (
@@ -993,7 +1001,7 @@ const ACCESS_SCOPE_LABELS = {
   selected_departments: "Selected Departments",
   selected_individuals: "Selected Individuals",
 };
-function MyAgents({ rows, userId, companies, departments, categories, busy, loadError, retry, focusResourceId, clearFocus }) {
+function MyAgents({ rows, userId, companies, departments, categories, busy, loadError, retry, focusResourceId, clearFocus, admin, edit, manage }) {
   const [search, setSearch] = useState(""),
     [details, setDetails] = useState(null),
     [filters, setFilters] = useState({
@@ -1025,6 +1033,12 @@ function MyAgents({ rows, userId, companies, departments, categories, busy, load
   });
   function filter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+  async function remove(resource) {
+    const created = resource.created_at ? ` added ${new Date(resource.created_at).toLocaleString()}` : "";
+    if (!window.confirm(`Permanently delete ${resource.name}${created}? Its related history will also be deleted. This cannot be undone.`)) return;
+    const deleted = await manage(resource.id, "delete");
+    if (deleted) setDetails(null);
   }
   useEffect(() => {
     if (!focusResourceId) return;
@@ -1069,13 +1083,13 @@ function MyAgents({ rows, userId, companies, departments, categories, busy, load
           <table>
             <thead>
               <tr>
-                <th>Resource</th><th>Type</th><th>Company</th><th>Category / Department</th><th>Owner</th><th>Platform / Vendor</th><th>Access instructions</th><th>Access</th><th>Status</th><th>Expiration / Renewal</th><th>Open</th>
+                <th>Resource</th><th>Type</th><th>Company</th><th>Category / Department</th><th>Owner</th><th>Platform / Vendor</th><th>Access instructions</th><th>Access</th><th>Status</th><th>Expiration / Renewal</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((row) => (
                 <tr key={row.id}>
-                  <td><b>{row.name}</b><small>{row.description}</small></td>
+                  <td><b>{row.name}</b><small>{row.description}</small>{row.created_at && <small>Added {new Date(row.created_at).toLocaleString()}</small>}</td>
                   <td>{row.entry_type || "agent"}</td>
                   <td>{row.companies?.name || "Unassigned"}</td>
                   <td>{row.category || "—"}<small>{row.department || "—"}</small></td>
@@ -1085,7 +1099,7 @@ function MyAgents({ rows, userId, companies, departments, categories, busy, load
                   <td>{ACCESS_SCOPE_LABELS[row.access_scope] || "Admins Only"}<small>{row.access_permission || "view"}</small></td>
                   <td><Pill text={row.status} /><small>{row.governance_status || "assessment pending"}</small></td>
                   <td>{row.access_expires_at ? `Access: ${new Date(row.access_expires_at).toLocaleDateString()}` : "No access expiration"}<small>{row.platform_details?.renewal_at ? `Renewal: ${new Date(row.platform_details.renewal_at).toLocaleDateString()}` : ""}</small></td>
-                  <td>{row.url ? <a className="open-resource" href={row.url} target="_blank" rel="noreferrer">Open {row.entry_type === "skillset" ? "Skillset" : row.entry_type === "platform" ? "Platform" : "Agent"} ↗</a> : "—"}</td>
+                  <td><div className="directory-actions"><button onClick={() => setDetails(row)}>View</button>{admin && <button onClick={() => edit(row)}>Edit</button>}{row.url && <a className="open-resource" href={row.url} target="_blank" rel="noreferrer">Open {row.entry_type === "skillset" ? "Skillset" : row.entry_type === "platform" ? "Platform" : row.entry_type === "product" ? "Product" : "Agent"} ↗</a>}{admin && <button className="danger" onClick={() => remove(row)}>Delete</button>}</div></td>
                 </tr>
               ))}
             </tbody>
@@ -1093,7 +1107,7 @@ function MyAgents({ rows, userId, companies, departments, categories, busy, load
         </div>
       )}
       <p className="external-access-banner">Availability in The Hub does not automatically create a license or user account in an external platform. Follow the listed access instructions or contact the designated administrator.</p>
-      {details && <ResourceDetails agent={details} close={() => setDetails(null)} />}
+      {details && <ResourceDetails agent={details} close={() => setDetails(null)} edit={admin ? edit : null} remove={admin ? remove : null} />}
     </>
   );
 }
@@ -1156,11 +1170,11 @@ function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, use
       <div className="directory-table-wrapper"><table className="resource-directory-table"><thead><tr>{DIRECTORY_COLUMNS.filter(([key]) => shown(key)).map(([key,label]) => <th key={key} className={`${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}-column`}>{label}</th>)}</tr></thead><tbody>{visible.map((agent) => <tr key={agent.id}>{DIRECTORY_COLUMNS.filter(([key]) => shown(key)).map(([key]) => <td key={key} className={`${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}-column`}>{cell(key,agent)}</td>)}</tr>)}</tbody></table></div>
       <div className="directory-mobile-cards">{visible.map((agent) => <article key={agent.id}><h2>{agent.name}</h2><dl><div><dt>Type</dt><dd>{agent.entry_type || "agent"}</dd></div><div><dt>Company</dt><dd>{agent.companies?.name || "Unassigned"}</dd></div><div><dt>Owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${risk(agent)} · ${agent.governance_score}%`}</dd></div></dl><footer><button onClick={() => setDetails(agent)}>View Details</button>{agent.url && <a href={agent.url} target="_blank" rel="noreferrer">Open ↗</a>}{canEdit && <button onClick={() => edit(agent)}>Edit</button>}{admin && <button onClick={() => manage(agent.id,agent.status === "retired" ? "restore" : "archive")}>{agent.status === "retired" ? "Restore" : "Archive"}</button>}{admin && <button className="danger" onClick={() => remove(agent)}>Delete</button>}</footer></article>)}</div>
     </>}
-    {details && <ResourceDetails agent={details} close={() => setDetails(null)} edit={canEdit ? edit : null} />}
+    {details && <ResourceDetails agent={details} close={() => setDetails(null)} edit={canEdit ? edit : null} remove={admin ? remove : null} />}
   </>;
 }
-function ResourceDetails({ agent, close, edit }) {
-  return <div className="backdrop"><section className="modal compact resource-details" role="dialog" aria-modal="true" aria-labelledby="resource-details-title"><header><div><small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned"}</small><h2 id="resource-details-title">{agent.name}</h2></div><button onClick={close}>×</button></header><Notice short/><dl><div><dt>Purpose and business problem</dt><dd>{agent.purpose || agent.description || "—"}</dd></div><div><dt>Accountable owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Original creator</dt><dd>{agent.original_creator || "—"}</dd></div><div><dt>Department / category</dt><dd>{agent.department || "—"} · {agent.category || "—"}</dd></div><div><dt>Hosting</dt><dd>{agent.hosting_environment || agent.environment || "—"} · {agent.company_controlled_hosting === true ? "company-controlled" : agent.company_controlled_hosting === false ? "migration may be needed" : "needs verification"}</dd></div><div><dt>Company Stewardship</dt><dd><Pill text={agent.stewardship_status}/></dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Governance Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${riskLabel(riskBand(agent.governance_score))} · ${agent.governance_score}%`}</dd></div><div><dt>Access</dt><dd>{ACCESS_SCOPE_LABELS[agent.access_scope] || "Admins Only"}</dd></div><div><dt>Capabilities</dt><dd>{agent.skills_summary || "—"}</dd></div><div><dt>Integrations</dt><dd>{(agent.integrations || []).join(", ") || "—"}</dd></div><div><dt>Review date</dt><dd>{agent.review_date || "—"}</dd></div></dl><footer>{(agent.hosted_url || agent.url) && <a href={agent.hosted_url || agent.url} target="_blank" rel="noreferrer">Open resource ↗</a>}{edit && <button className="primary" onClick={() => { close(); edit(agent); }}>Edit resource</button>}<button onClick={close}>Close</button></footer></section></div>;
+function ResourceDetails({ agent, close, edit, remove }) {
+  return <div className="backdrop"><section className="modal compact resource-details" role="dialog" aria-modal="true" aria-labelledby="resource-details-title"><header><div><small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned"}</small><h2 id="resource-details-title">{agent.name}</h2></div><button onClick={close}>×</button></header><Notice short/><dl><div><dt>Purpose and business problem</dt><dd>{agent.purpose || agent.description || "—"}</dd></div><div><dt>Accountable owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Original creator</dt><dd>{agent.original_creator || "—"}</dd></div><div><dt>Department / category</dt><dd>{agent.department || "—"} · {agent.category || "—"}</dd></div><div><dt>Hosting</dt><dd>{agent.hosting_environment || agent.environment || "—"} · {agent.company_controlled_hosting === true ? "company-controlled" : agent.company_controlled_hosting === false ? "migration may be needed" : "needs verification"}</dd></div><div><dt>Company Stewardship</dt><dd><Pill text={agent.stewardship_status}/></dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Governance Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${riskLabel(riskBand(agent.governance_score))} · ${agent.governance_score}%`}</dd></div><div><dt>Access</dt><dd>{ACCESS_SCOPE_LABELS[agent.access_scope] || "Admins Only"}</dd></div><div><dt>Capabilities</dt><dd>{agent.skills_summary || "—"}</dd></div><div><dt>Integrations</dt><dd>{(agent.integrations || []).join(", ") || "—"}</dd></div><div><dt>Review date</dt><dd>{agent.review_date || "—"}</dd></div></dl><footer>{remove && <button className="danger" onClick={() => remove(agent)}>Delete resource</button>}{(agent.hosted_url || agent.url) && <a href={agent.hosted_url || agent.url} target="_blank" rel="noreferrer">Open resource ↗</a>}{edit && <button className="primary" onClick={() => { close(); edit(agent); }}>Edit resource</button>}<button onClick={close}>Close</button></footer></section></div>;
 }
 function LegacyAgents({ rows, companies, busy, canEdit, admin, open, edit, manage }) {
   const [company, setCompany] = useState("all"),

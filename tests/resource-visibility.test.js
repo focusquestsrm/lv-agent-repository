@@ -84,3 +84,18 @@ test("resource loader disambiguates the owning company from additional company a
   assert.match(app, /select\("\*,companies!agents_company_id_fkey\(name\)"\)/);
   assert.doesNotMatch(app, /select\("\*,companies\(name\)"\)/);
 });
+
+test("admins can edit and permanently delete individual records from My Resources", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const managementFunction = readFileSync(new URL("../netlify/functions/manage-agent.mjs", import.meta.url), "utf8");
+  assert.match(app, /<MyAgents[\s\S]*admin=\{admin\}[\s\S]*manage=\{manageAgent\}/);
+  assert.match(app, /<th>Actions<\/th>/);
+  assert.match(app, /Delete resource/);
+  assert.match(app, /Permanently delete \$\{resource\.name\}/);
+  assert.match(managementFunction, /caller\?\.role !== "admin"/);
+  assert.match(managementFunction, /adminClient\.from\("agents"\)\.delete\(\)\.eq\("id", id\)/);
+  const deletionMigration = readFileSync(new URL("../supabase/migrations/027_restore_admin_resource_deletion.sql", import.meta.url), "utf8");
+  assert.match(deletionMigration, /resource_registration_drafts_submitted_resource_id_fkey[\s\S]*on delete set null/i);
+  assert.match(deletionMigration, /admin_awareness_notifications_resource_id_fkey[\s\S]*on delete set null/i);
+  assert.doesNotMatch(deletionMigration, /delete from|truncate|disable row level security/i);
+});
