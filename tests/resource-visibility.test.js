@@ -69,3 +69,12 @@ test("creator visibility migration enforces tenant isolation", () => {
   assert.match(sql, /viewer\.tenant_key=agent\.tenant_key/);
   assert.match(sql, /agent\.status='approved' and agent\.governance_status='cleared'/);
 });
+
+test("Data API CORS migration preserves the former origin and allows the Hub production origin", () => {
+  const sql = readFileSync(new URL("../supabase/migrations/026_restore_hub_api_cors.sql", import.meta.url), "utf8");
+  assert.match(sql, /alter role authenticator set pgrst\.server_cors_allowed_origins/i);
+  assert.match(sql, /https:\/\/agentrepository\.lead-ventures\.com/);
+  assert.match(sql, /https:\/\/thehub\.lead-ventures\.com/);
+  assert.match(sql, /notify pgrst, 'reload config'/i);
+  assert.doesNotMatch(sql, /disable row level security|drop table|truncate/i);
+});
