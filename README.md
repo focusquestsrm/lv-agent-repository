@@ -1,6 +1,8 @@
-# Lead Ventures Agents & Platform Repository
+# The Hub – Powering Lead Ventures
 
-A production-oriented Netlify + Supabase application for cataloging AI agents, reusable skillsets, and approved platforms; preserving prompt history; screening resources for governance risk; and enforcing Admin/Editor/Viewer access.
+A production-oriented Netlify + Supabase application and centralized source of truth for Lead Ventures Agents, Skillsets, Platforms, Products, operational lifecycles, governance, stewardship, duplicate review, and access.
+
+> The agents, skillsets, platforms, lifecycle maps, and related information contained in The Hub are proprietary to and owned by Lead Ventures. Access and use are limited to authorized users.
 
 This package contains no demonstration records. `danielle@focusquest.com` and the first person who creates an account become administrators; every later account starts as an editor.
 
@@ -8,10 +10,17 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 - Email/password authentication
 - Self-service account creation and password recovery
-- Direct creation of agents, reusable skillsets, and approved platforms by Admins and Editors
+- Direct creation of Agents, Skillsets, Platforms, and Products by Admins and Editors
+- Deterministic Start Here classification guidance without an external AI API
+- Lead Ventures Product Suite with card/table views, filters, comparisons, and a relationship map
+- Flexible database-driven linear, circular, phased, nested, and hybrid operational lifecycles
+- FocusQuest and D9 Network optional starter templates derived from the supplied references (the reference HTML is never served)
+- Lifecycle versioning, archival/restoration, safe mapped-stage deletion, access management, and graphical/list views
+- Deterministic URL/keyword duplicate detection and a separate Potential Duplicates queue
+- Company Stewardship verification, creator attribution, hosting/admin control, integrations, and review dates
 - Admin-managed Lead Ventures companies
 - Admin-managed departments and categories with active/inactive controls
-- Personalized **My Agents & Platforms** discovery
+- Personalized **My Resources** discovery
 - Platform vendor, license, access-request, support, data-restriction, approved/prohibited-use, and renewal details
 - Admin-controlled owner, individual, company, Admin-only, and team-wide resource access
 - Effective and expiration dates with access audit history
@@ -38,7 +47,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. If `schema.sql` completed successfully, run migrations `006`, `007`, `008`, `009`, `010`, `011`, `012`, `013`, `014`, `015`, `016`, and `017` in numeric order. Do not run migrations 004 or 005; those belong to the retired routing and pre-build request workflows.
+3. If `schema.sql` completed successfully, run migrations `006` through `022` in numeric order, except `004` and `005`. The new Hub migrations must run in this order: `018_hub_resource_stewardship.sql`, `019_operational_lifecycles.sql`, `020_lifecycle_security_templates.sql`, `021_product_suite.sql`, then `022_resource_department_access.sql`.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -103,6 +112,11 @@ If you already ran the original schema, run these migrations in order in the Sup
 12. `supabase/migrations/015_deterministic_governance_and_advisory.sql`
 13. `supabase/migrations/016_likert_risk_scoring_and_threshold.sql`
 14. `supabase/migrations/017_directory_preferences_and_governance_followup.sql`
+15. `supabase/migrations/018_hub_resource_stewardship.sql`
+16. `supabase/migrations/019_operational_lifecycles.sql`
+17. `supabase/migrations/020_lifecycle_security_templates.sql`
+18. `supabase/migrations/021_product_suite.sql`
+19. `supabase/migrations/022_resource_department_access.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing resources and users can then be assigned to the appropriate company. Company assignment supports organization and filtering; it does not restrict resource access unless an Admin explicitly chooses **Selected Companies**. The directory includes a company dropdown, including companies that do not yet have a resource.
 
@@ -112,7 +126,7 @@ Migration 007 backfills `public.profiles` from existing Supabase Authentication 
 
 The **Users & Access** page also reconciles Authentication users with access profiles whenever an administrator opens it. This server-side repair requires `SUPABASE_SERVICE_ROLE_KEY` in Netlify and preserves existing roles and company assignments.
 
-Migration 008 introduced the provider settings now located under **Admin → AI & Governance Settings**. Choose Anthropic Claude, OpenAI (ChatGPT), or Google Gemini only for optional Admin-initiated advisory assessments. Add the matching API key in Netlify environment variables; keys are never stored in Supabase or exposed to the browser.
+Migration 008 introduced provider settings now located under **Admin → AI Settings**. Choose Anthropic Claude, OpenAI (ChatGPT), or Google Gemini only for optional Admin-initiated advisory assessments. Add the matching API key in Netlify environment variables; keys are never stored in Supabase or exposed to the browser.
 
 Migration 009 adds managed departments and categories. It imports distinct department and category text from existing agents without modifying those records, prevents case-insensitive duplicate names, and seeds these default categories: Customer Service; Marketing and Content; Sales and Lead Generation; Data and Analytics; Research; Process Automation; Finance; Human Resources; Compliance and Risk; Education and Student Support; Software Development; and General Productivity. Run this migration in Supabase before deploying the matching application update. Admins manage all values from **Admin → Departments & Categories**; inactive values remain visible to Admins but cannot be selected for new entries.
 
@@ -132,6 +146,26 @@ Migration 016 introduces the employee-facing, plain-language Likert assessment a
 
 Migration 017 stores per-user Directory columns with a local-storage fallback, owner assessment drafts, requests and deadlines for current owner-completed Governance Checks, and issue-focused review records. It adds indexes, owner/Admin RLS, an Admin-only request function, and automatically closes a pending owner request when the current Likert assessment is submitted. Run it once after migration 016.
 
+Migrations 018–022 implement The Hub resource metadata, Company Stewardship, deterministic classifications and duplicate records, company lifecycle graphs and RLS, lifecycle templates/versioning/safe deletion, Product as a fourth resource type, cycle-safe Product architecture, and department-scoped access. They are additive and idempotent. Lifecycle absence, standalone Product status, and unevaluated alignment never change the governance score or independently route a resource into governance review.
+
+## Operational lifecycle administration
+
+Admins can start blank or use the optional FocusQuest/D9 templates, customize phases and stages, add parent stages and feedback connections, preview the generated graph or accessible list, publish, create a new version, archive, and restore. Lifecycle access is enforced in Supabase RLS for Admins only, the entire tenant, the lifecycle company, selected departments, or selected individuals. Active Admins—including Sean and Danielle while their profiles retain that role—always have access.
+
+The reference files under `reference/lifecycles/` are design/data-model references only. They are not copied into `dist`, routed, embedded, or served by the application.
+
+## Product Suite and lifecycle independence
+
+Product is a first-class resource type. Product-suite membership, lifecycle alignment, and governance risk are separate concepts. Products may be mapped to stages, support multiple stages, support a company generally, stand alone as a Lead Ventures Product, be not applicable, or remain not yet evaluated. Only deterministic governance answers and mandatory safeguards affect governance routing.
+
+## Company export and portability
+
+Supabase Admins can export company-scoped records from the Table Editor or SQL using `company_id`, then include linked rows from `resource_companies`, `operational_lifecycles`, phases, stages, connections, viewers, mappings, and Product relationships. UUID relationships and explicit company ownership keep each company logically separable while allowing approved cross-company connections.
+
+## Authentication email templates
+
+Supabase owns authentication templates rather than this repository. In **Authentication → Email Templates**, update the sender name and subject/body copy to **The Hub – Powering Lead Ventures** for confirmation, invitation, magic-link, email-change, and password-recovery messages. Keep the generated confirmation URL token unchanged.
+
 Resource submissions are always saved. Stronger governance controls produce fewer risk points: Strongly Agree = 0, Agree = 25, Not Sure = 50, Disagree = 75, and Strongly Disagree = 100. A justified Not Applicable response is excluded. Category risk is calculated before weights are applied. Scores of 0–19 are Low, 20–39 Moderate-Low, 40–59 Medium, 60–79 High, and 80–100 Critical. The default Admin-review threshold is 40%; Admins may change it under **Admin → AI & Governance Settings** for future assessments. Missing information produces **Assessment Pending**, and mandatory safeguards trigger review independently of the score.
 
 Repository access controls visibility of resource records, prompts, URLs, platform details, and governance information. Availability in this repository does not automatically create a license or user account in an external platform. Follow the listed access instructions or contact the designated administrator.
@@ -145,7 +179,9 @@ For security, disable open sign-ups in Supabase after the first administrator is
 | Capability | Admin | Editor | Viewer |
 |---|:---:|:---:|:---:|
 | View agents, prompts, governance, and history | ✓ | ✓ | ✓ |
-| Add or edit agents, skillsets, platforms, and prompt versions | ✓ | ✓ | — |
+| Add or edit Agents, Skillsets, Platforms, Products, and prompt versions | ✓ | ✓ | — |
+| Manage operational lifecycles, access, templates, and versions | ✓ | — | — |
+| Manage Product architecture and Potential Duplicates | ✓ | — | — |
 | Create governance assessment records | ✓ | ✓ | — |
 | Approve and publish another person’s prompt | ✓ | — | — |
 | Change user roles and company assignments | ✓ | — | — |

@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase, configured } from "./supabase";
 import { ASSESSMENT_VERSION, DEFAULT_REVIEW_THRESHOLD, GOVERNANCE_CATEGORIES, LIKERT_OPTIONS, OVERRIDE_QUESTIONS, TRIGGER_QUESTIONS, evaluateGovernance, initialQuestionnaire, riskBand, riskLabel, visibleStatements } from "./governance";
+import { findDuplicates } from "./duplicates";
+import { DuplicateQueue, Lifecycles, ProductSuite, ResourceCompare, StartHere } from "./HubFeatures";
+import { APP_LOGO_ALT, APP_LOGO_URL } from "./brand";
 export default function App() {
   const [session, setSession] = useState(null),
     [profile, setProfile] = useState(null),
@@ -104,8 +107,8 @@ function Auth() {
           Accountable by design.
         </h1>
         <p>
-          The Lead Ventures Agents & Platform Repository is one secure workspace
-          for prompts, approvals, approved platforms, responsible AI controls, and access.
+          The Hub – Powering Lead Ventures is the secure source of truth for
+          Agents, Skillsets, Platforms, company lifecycles, governance, and access.
         </p>
       </section>
       <form onSubmit={submit}>
@@ -170,7 +173,7 @@ function Auth() {
         >
           {mode === "signup"
             ? "Already have an account? Sign in"
-            : "New to the repository? Join workspace"}
+            : "New to The Hub? Join workspace"}
         </button>
         {mode === "forgot" && (
           <button
@@ -207,7 +210,7 @@ function SetPassword({ done }) {
         <h1>Choose a new password.</h1>
         <p>
           Your reset link has been verified. Create a strong password to return
-          to the repository.
+          to The Hub – Powering Lead Ventures.
         </p>
       </section>
       <form onSubmit={submit}>
@@ -258,6 +261,15 @@ function Registry({ session, profile }) {
     [recommendations, setRecommendations] = useState([]),
     [savedAttentionItems, setSavedAttentionItems] = useState([]),
     [appSettings, setAppSettings] = useState({}),
+    [lifecycles, setLifecycles] = useState([]),
+    [lifecyclePhases, setLifecyclePhases] = useState([]),
+    [lifecycleStages, setLifecycleStages] = useState([]),
+    [lifecycleConnections, setLifecycleConnections] = useState([]),
+    [lifecycleViewers, setLifecycleViewers] = useState([]),
+    [lifecycleMappings, setLifecycleMappings] = useState([]),
+    [duplicateMatches, setDuplicateMatches] = useState([]),
+    [productRelationships, setProductRelationships] = useState([]),
+    [resourceDepartmentAccess, setResourceDepartmentAccess] = useState([]),
     [assessmentResult, setAssessmentResult] = useState(null),
     [busy, setBusy] = useState(true),
     [modal, setModal] = useState(false),
@@ -275,10 +287,10 @@ function Registry({ session, profile }) {
     );
   const canEdit = ["admin", "editor"].includes(profile.role),
     admin = profile.role === "admin";
-  const adminViews = ["users", "companies", "taxonomy", "access", "settings"];
+  const adminViews = ["users", "companies", "taxonomy", "access", "lifecycles-admin", "duplicates", "settings"];
   async function load() {
     setBusy(true);
-    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, attention, settings] = await Promise.all([
+    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, attention, settings, lc, lp, ls, lconn, lv, lm, dup, productLinks, departmentAccess] = await Promise.all([
       supabase
         .from("agents")
         .select("*,companies(name)")
@@ -306,6 +318,15 @@ function Registry({ session, profile }) {
       supabase.from("governance_recommendations").select("*").order("created_at", { ascending: false }),
       supabase.from("governance_attention_items").select("*").order("created_at", { ascending: false }),
       supabase.from("app_settings").select("setting_key,setting_value"),
+      supabase.from("operational_lifecycles").select("*").order("updated_at", { ascending: false }),
+      supabase.from("lifecycle_phases").select("*").order("sequence"),
+      supabase.from("lifecycle_stages").select("*").order("sequence"),
+      supabase.from("lifecycle_connections").select("*"),
+      supabase.from("lifecycle_viewers").select("*"),
+      supabase.from("resource_lifecycle_mappings").select("*"),
+      supabase.from("resource_duplicate_matches").select("*").order("created_at", { ascending: false }),
+      supabase.from("product_relationships").select("*").order("created_at"),
+      supabase.from("resource_department_access").select("*").order("department"),
     ]);
     const details = pd.data || [];
     setAgents(
@@ -329,6 +350,15 @@ function Registry({ session, profile }) {
     setRecommendations(gr.data || []);
     setSavedAttentionItems(attention.data || []);
     setAppSettings(Object.fromEntries((settings.data || []).map((item) => [item.setting_key, item.setting_value])));
+    setLifecycles(lc.data || []);
+    setLifecyclePhases(lp.data || []);
+    setLifecycleStages(ls.data || []);
+    setLifecycleConnections(lconn.data || []);
+    setLifecycleViewers(lv.data || []);
+    setLifecycleMappings(lm.data || []);
+    setDuplicateMatches(dup.data || []);
+    setProductRelationships(productLinks.data || []);
+    setResourceDepartmentAccess(departmentAccess.data || []);
     setBusy(false);
   }
   useEffect(() => {
@@ -442,8 +472,11 @@ function Registry({ session, profile }) {
   }
   const nav = [
     ["dashboard", "▥", "Dashboard"],
-    ["my-agents", "★", "My Agents & Platforms"],
-    ["agents", "▦", "Agents & Platform Directory"],
+    ["my-agents", "★", "My Resources"],
+    ["agents", "▦", "Resource Directory"],
+    ["products", "◆", "Lead Ventures Product Suite"],
+    ["lifecycles", "↻", "Company Lifecycles"],
+    ["compare", "⇄", "Compare Resources"],
     ["approvals", "✓", "Prompt Approvals"],
     ["governance", "◇", "AI Governance"],
   ];
@@ -452,7 +485,9 @@ function Registry({ session, profile }) {
     ["companies", "◫", "Companies"],
     ["taxonomy", "●", "Departments & Categories"],
     ["access", "◆", "Access Management"],
-    ["settings", "⚙", "AI & Governance Settings"],
+    ["lifecycles-admin", "↻", "Operational Lifecycles"],
+    ["duplicates", "≋", "Potential Duplicates"],
+    ["settings", "⚙", "AI Settings"],
   ];
   return (
     <main className={`shell ${theme === "light" ? "light-theme" : ""}`}>
@@ -507,20 +542,25 @@ function Registry({ session, profile }) {
       <section className="content">
         <header>
           <span>
-            Agents & Platform Repository /{" "}
+            The Hub – Powering Lead Ventures /{" "}
             <b>
               {
                 {
                   dashboard: "Dashboard",
-                  agents: "Agents & Platform Directory",
-                  "my-agents": "My Agents & Platforms",
+                  agents: "Resource Directory",
+                  products: "Lead Ventures Product Suite",
+                  lifecycles: "Company Lifecycles",
+                  compare: "Compare Resources",
+                  "my-agents": "My Resources",
                   approvals: "Prompt Approvals",
                   governance: "AI Governance",
                   companies: "Companies",
                   users: "Users & Access",
                   taxonomy: "Departments & Categories",
                   access: "Access Management",
-                  settings: "AI & Governance Settings",
+                  "lifecycles-admin": "Operational Lifecycles",
+                  duplicates: "Potential Duplicates",
+                  settings: "AI Settings",
                 }[view]
               }
             </b>
@@ -558,6 +598,11 @@ function Registry({ session, profile }) {
             userAccess={userAccess}
             companyAccess={companyAccess}
             canEdit={canEdit}
+            start={(guidance) => {
+              sessionStorage.setItem("hub-classification-guidance", JSON.stringify(guidance));
+              setEditingAgent(null);
+              setModal(true);
+            }}
             open={() => {
               setEditingAgent(null);
               setModal(true);
@@ -592,6 +637,9 @@ function Registry({ session, profile }) {
             manage={manageAgent}
           />
         )}{" "}
+        {view === "products" && <ProductSuite resources={agents} relationships={productRelationships} mappings={lifecycleMappings} companies={companies} lifecycles={lifecycles} admin={admin} open={canEdit ? () => { sessionStorage.setItem("hub-create-type", "product"); setEditingAgent(null); setModal(true); } : null} edit={canEdit ? (agent) => { setEditingAgent(agent); setModal(true); } : null} reload={load} notify={setToast} />}{" "}
+        {view === "lifecycles" && <Lifecycles lifecycles={lifecycles.filter((item) => item.status !== "archived")} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} admin={false} reload={load} notify={setToast} />}{" "}
+        {view === "compare" && <ResourceCompare resources={agents.filter((item) => item.status !== "retired")} />}{" "}
         {view === "approvals" && (
           <Approvals
             rows={versions}
@@ -614,6 +662,7 @@ function Registry({ session, profile }) {
           <Users
             rows={users}
             companies={companies}
+            departments={departments}
             admin={admin}
             session={session}
             reload={load}
@@ -638,6 +687,8 @@ function Registry({ session, profile }) {
             edit={setAccessModal}
           />
         )}
+        {admin && view === "lifecycles-admin" && <Lifecycles lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} admin reload={load} notify={setToast} />}
+        {admin && view === "duplicates" && <DuplicateQueue matches={duplicateMatches} resources={agents} notify={setToast} reload={load} />}
         {admin && view === "settings" && <AISettings user={session.user} />}
       </section>
       {accessModal && (
@@ -668,6 +719,11 @@ function Registry({ session, profile }) {
             companies={companies}
             departments={departments}
             categories={categories}
+            allAgents={agents}
+            lifecycles={lifecycles}
+            lifecycleStages={lifecycleStages}
+            lifecycleMappings={lifecycleMappings.filter((item) => item.resource_id === editingAgent?.id)}
+            departmentAccess={resourceDepartmentAccess.filter((item) => item.resource_id === editingAgent?.id)}
             userAccess={userAccess.filter(
               (assignment) => assignment.agent_id === editingAgent?.id,
             )}
@@ -724,7 +780,7 @@ function Registry({ session, profile }) {
     </main>
   );
 }
-function Dashboard({ agents, companies, busy, canEdit, open }) {
+function Dashboard({ agents, companies, busy, canEdit, open, start }) {
   const approved = agents.filter(
     (resource) => resource.governance_status === "cleared" && resource.status !== "retired",
   );
@@ -739,7 +795,7 @@ function Dashboard({ agents, companies, busy, canEdit, open }) {
           <small>LEAD VENTURES AI ENABLEMENT</small>
           <h1>Build boldly. Govern intelligently.</h1>
           <p>
-            Discover approved agents, skillsets, and AI platforms in one governed Lead Ventures workspace.
+            The Hub is the centralized source of truth for every Agent, Skillset, Platform, Product, and company operational lifecycle.
           </p>
           {canEdit && (
             <button className="primary" onClick={open}>
@@ -748,12 +804,15 @@ function Dashboard({ agents, companies, busy, canEdit, open }) {
           )}
         </div>
       </section>
+      <Notice />
+      {canEdit && <StartHere onCreate={start} />}
       <Stats
         values={[
           [approved.length, "Approved resources available"],
           [approved.filter((resource) => resource.entry_type === "agent").length, "Total Agents"],
           [approved.filter((resource) => resource.entry_type === "skillset").length, "Total Skillsets"],
           [approved.filter((resource) => resource.entry_type === "platform").length, "Total Platforms"],
+          [approved.filter((resource) => resource.entry_type === "product").length, "Total Products"],
           [recent.length, "Recently added resources"],
         ]}
       />
@@ -858,6 +917,9 @@ const ACCESS_SCOPE_LABELS = {
   admins_only: "Admins Only",
   selected_companies: "Selected Companies",
   entire_team: "Entire Team",
+  entire_company: "Entire Company",
+  selected_departments: "Selected Departments",
+  selected_individuals: "Selected Individuals",
 };
 function MyAgents({ rows, companies, departments, categories, busy }) {
   const [search, setSearch] = useState(""),
@@ -894,7 +956,7 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
     <>
       <PageHead
         tag="PERSONALIZED ACCESS"
-        title="My Agents & Platforms"
+        title="My Resources"
         desc="Agents, reusable skillsets, and approved platforms available through team, company, ownership, role, or individual access."
       />
       <div className="resource-filters">
@@ -946,7 +1008,7 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
           </table>
         </div>
       )}
-      <p className="external-access-banner">Availability in this repository does not automatically create a license or user account in the external platform. Follow the listed access instructions or contact the designated administrator.</p>
+      <p className="external-access-banner">Availability in The Hub does not automatically create a license or user account in an external platform. Follow the listed access instructions or contact the designated administrator.</p>
     </>
   );
 }
@@ -1002,7 +1064,7 @@ function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, use
     actions: <div className="directory-actions"><button onClick={() => setDetails(agent)}>View</button>{canEdit && <button onClick={() => edit(agent)}>Edit</button>}{agent.url && <a href={agent.url} target="_blank" rel="noreferrer">Open ↗</a>}{admin && <details className="action-menu"><summary>More</summary><div><button onClick={() => manage(agent.id, agent.status === "retired" ? "restore" : "archive")}>{agent.status === "retired" ? "Restore" : "Archive"}</button><button className="danger" onClick={() => remove(agent)}>Delete</button></div></details>}</div>,
   })[key];
   return <>
-    <PageHead tag="TEAM INTELLIGENCE" title="Agents & Platform Directory" desc="The governed source of truth for AI agents, reusable skillsets, and approved platforms." action={canEdit && <button className="primary" onClick={open}>＋ Add resource</button>}/>
+    <PageHead tag="TEAM INTELLIGENCE" title="Resource Directory" desc="The Hub source of truth for authorized Agents, Skillsets, Platforms, and Products." action={canEdit && <button className="primary" onClick={open}>＋ Add resource</button>}/>
     <div className="filterbar directory-filterbar"><label>Agents by Company<select value={company} onChange={(e) => setCompany(e.target.value)}><option value="all">All companies</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Archive status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">Active entries</option><option value="archived">Archived entries</option><option value="all">All entries</option></select></label><div className="column-selector"><button aria-expanded={columnsOpen} onClick={() => { setDraftColumns(columns); setColumnsOpen((current) => !current); }}>Columns</button>{columnsOpen && <div className="column-popover"><b>Visible columns</b>{DIRECTORY_COLUMNS.map(([id, label]) => <label key={id}><input type="checkbox" disabled={id === "resource"} checked={id === "resource" || draftColumns.includes(id)} onChange={(e) => setDraftColumns((current) => e.target.checked ? [...current, id] : current.filter((key) => key !== id))}/>{label}{id === "resource" && <small>Required</small>}</label>)}<footer><button onClick={() => setDraftColumns(DIRECTORY_COLUMNS.map(([id]) => id))}>Select All</button><button onClick={() => setDraftColumns(DEFAULT_DIRECTORY_COLUMNS)}>Reset to Default</button><button className="primary" onClick={applyColumns}>Apply</button></footer></div>}</div></div>
     <Stats values={[[visible.length,"Total resources"],[visible.filter((item) => item.entry_type === "platform").length,"Platforms"],[visible.filter((item) => item.entry_type === "skillset").length,"Skillsets"],[visible.filter((item) => item.governance_flagged).length,"Governance flags"],[visible.length ? `${Math.round(visible.reduce((sum,item) => sum+(item.governance_score||0),0)/visible.length)}%` : "—","Average governance risk"]]}/>
     {busy ? <Loading/> : visible.length === 0 ? <Empty title="No resources found" text="Add an entry or select a different company." action={canEdit && <button className="primary" onClick={open}>Add resource</button>}/> : <>
@@ -1013,7 +1075,7 @@ function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, use
   </>;
 }
 function ResourceDetails({ agent, close, edit }) {
-  return <div className="backdrop"><section className="modal compact resource-details" role="dialog" aria-modal="true" aria-labelledby="resource-details-title"><header><div><small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned"}</small><h2 id="resource-details-title">{agent.name}</h2></div><button onClick={close}>×</button></header><dl><div><dt>Description</dt><dd>{agent.description || "—"}</dd></div><div><dt>Owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Department</dt><dd>{agent.department || "—"}</dd></div><div><dt>Category</dt><dd>{agent.category || "—"}</dd></div><div><dt>Runs on</dt><dd>{agent.platform || "—"} · {agent.environment || "—"}</dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Governance Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${riskLabel(riskBand(agent.governance_score))} · ${agent.governance_score}%`}</dd></div><div><dt>Access</dt><dd>{ACCESS_SCOPE_LABELS[agent.access_scope] || "Admins Only"}</dd></div><div><dt>Capabilities</dt><dd>{agent.skills_summary || "—"}</dd></div></dl><footer>{agent.url && <a href={agent.url} target="_blank" rel="noreferrer">Open resource ↗</a>}{edit && <button className="primary" onClick={() => { close(); edit(agent); }}>Edit resource</button>}<button onClick={close}>Close</button></footer></section></div>;
+  return <div className="backdrop"><section className="modal compact resource-details" role="dialog" aria-modal="true" aria-labelledby="resource-details-title"><header><div><small>{agent.entry_type || "agent"} · {agent.companies?.name || "Unassigned"}</small><h2 id="resource-details-title">{agent.name}</h2></div><button onClick={close}>×</button></header><Notice short/><dl><div><dt>Purpose and business problem</dt><dd>{agent.purpose || agent.description || "—"}</dd></div><div><dt>Accountable owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Original creator</dt><dd>{agent.original_creator || "—"}</dd></div><div><dt>Department / category</dt><dd>{agent.department || "—"} · {agent.category || "—"}</dd></div><div><dt>Hosting</dt><dd>{agent.hosting_environment || agent.environment || "—"} · {agent.company_controlled_hosting === true ? "company-controlled" : agent.company_controlled_hosting === false ? "migration may be needed" : "needs verification"}</dd></div><div><dt>Company Stewardship</dt><dd><Pill text={agent.stewardship_status}/></dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Governance Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${riskLabel(riskBand(agent.governance_score))} · ${agent.governance_score}%`}</dd></div><div><dt>Access</dt><dd>{ACCESS_SCOPE_LABELS[agent.access_scope] || "Admins Only"}</dd></div><div><dt>Capabilities</dt><dd>{agent.skills_summary || "—"}</dd></div><div><dt>Integrations</dt><dd>{(agent.integrations || []).join(", ") || "—"}</dd></div><div><dt>Review date</dt><dd>{agent.review_date || "—"}</dd></div></dl><footer>{(agent.hosted_url || agent.url) && <a href={agent.hosted_url || agent.url} target="_blank" rel="noreferrer">Open resource ↗</a>}{edit && <button className="primary" onClick={() => { close(); edit(agent); }}>Edit resource</button>}<button onClick={close}>Close</button></footer></section></div>;
 }
 function LegacyAgents({ rows, companies, busy, canEdit, admin, open, edit, manage }) {
   const [company, setCompany] = useState("all"),
@@ -1038,7 +1100,7 @@ function LegacyAgents({ rows, companies, busy, canEdit, admin, open, edit, manag
     <>
       <PageHead
         tag="TEAM INTELLIGENCE"
-        title="Agents & Platform Directory"
+        title="Resource Directory"
         desc="The governed source of truth for AI agents, reusable skillsets, and approved platforms."
         action={
           canEdit && (
@@ -1790,7 +1852,7 @@ function AccessEditor({
         </p>
         <label>
           Access scope
-          <FieldHelp>Choose who can discover and use this repository resource.</FieldHelp>
+          <FieldHelp>Choose who can discover and use this Hub resource.</FieldHelp>
           <select value={form.access_scope} onChange={(e) => set("access_scope", e.target.value)}>
             <option value="owner_only">Owner Only</option><option value="specific_people">Specific People</option><option value="admins_only">Admins Only</option><option value="selected_companies">Selected Companies</option><option value="entire_team">Entire Team</option>
           </select>
@@ -1840,6 +1902,11 @@ function AgentForm({
   companies,
   departments,
   categories,
+  allAgents,
+  lifecycles,
+  lifecycleStages,
+  lifecycleMappings,
+  departmentAccess,
   userAccess,
   companyAccess,
   admin,
@@ -1856,7 +1923,7 @@ function AgentForm({
     initialDepartmentManaged = activeDepartments.some((row) => row.name === agent?.department),
     initialCategoryManaged = activeCategories.some((row) => row.name === agent?.category);
   const [form, setForm] = useState({
-      entry_type: agent?.entry_type || "agent",
+      entry_type: agent?.entry_type || sessionStorage.getItem("hub-create-type") || "agent",
       company_id: agent?.company_id || "",
       name: agent?.name || "",
       description: agent?.description || "",
@@ -1887,6 +1954,29 @@ function AgentForm({
       prohibited_use_guidance: agent?.platform_details?.prohibited_use_guidance || "",
       renewal_at: agent?.platform_details?.renewal_at?.slice(0, 10) || "",
       platform_notes: agent?.platform_details?.notes || "",
+      logo_url: agent?.logo_url || "",
+      purpose: agent?.purpose || "",
+      original_creator: agent?.original_creator || currentUser.full_name || currentUser.email || "",
+      use_audience: agent?.use_audience || "internal",
+      commercial_status: agent?.commercial_status || "internal_only",
+      intended_users: agent?.intended_users || "",
+      hosted_url: agent?.hosted_url || agent?.url || "",
+      alternate_urls: (agent?.alternate_urls || []).join("\n"),
+      hosting_environment: agent?.hosting_environment || agent?.environment || "",
+      company_controlled_hosting: agent?.company_controlled_hosting == null ? "" : String(agent.company_controlled_hosting),
+      admin_control_confirmed: agent?.admin_control_confirmed == null ? "" : String(agent.admin_control_confirmed),
+      integrations: (agent?.integrations || []).join("\n"),
+      review_date: agent?.review_date || "",
+      stewardship_status: agent?.stewardship_status || "ownership_needs_verification",
+      product_family: agent?.product_family || "",
+      target_market: agent?.target_market || "",
+      target_industries: (agent?.target_industries || []).join("\n"),
+      demo_url: agent?.demo_url || "",
+      development_stage: agent?.development_stage || "concept",
+      pricing_model: agent?.pricing_model || "",
+      documentation_links: (agent?.documentation_links || []).join("\n"),
+      product_notes: agent?.product_notes || "",
+      lifecycle_relationship: agent?.lifecycle_relationship || "not_yet_evaluated",
     }),
     [error, setError] = useState(""),
     [checking, setChecking] = useState(false),
@@ -1910,8 +2000,10 @@ function AgentForm({
     [authorizedCompanies, setAuthorizedCompanies] = useState(
       companyAccess.map((assignment) => assignment.company_id),
     ),
+    [authorizedDepartments, setAuthorizedDepartments] = useState((departmentAccess || []).map((assignment) => assignment.department)),
     [step, setStep] = useState(1),
     [questionnaire, setQuestionnaire] = useState(() => initialQuestionnaire(assessment?.responses || {}, { accountable_owner_id: agent?.accountable_owner_id || currentUser.id }));
+  const [selectedLifecycleStages, setSelectedLifecycleStages] = useState((lifecycleMappings || []).map((item) => item.stage_id));
   const canCompleteGovernance = !admin || form.accountable_owner_id === currentUser.id;
   function set(k, v) {
     setForm((current) => ({ ...current, [k]: v }));
@@ -1929,10 +2021,17 @@ function AgentForm({
     setError("");
     if (!form.company_id || !form.name.trim() || !form.description.trim() || !form.department.trim() || !form.category.trim() || !form.environment.trim()) { setStep(1); return setError("Complete the required Resource Information fields before submitting."); }
     if (form.entry_type === "platform" && (!form.vendor.trim() || !form.access_request_instructions.trim())) { setStep(1); return setError("Complete the required Platform details before submitting."); }
-    if (!form.prompt.trim()) { setStep(4); return setError("Add the current initial prompt before submitting."); }
+    if (!form.prompt.trim() && form.entry_type !== "product") { setStep(4); return setError("Add the current initial prompt before submitting."); }
     const ownerName = form.owner_name === "Other" ? customOwner.trim() : form.owner_name.trim();
     if (!ownerName) { setStep(1); return setError("Select or enter an accountable owner."); }
     const submission = { ...form, owner_name: ownerName };
+    const possibleDuplicates = findDuplicates({ ...submission, id: agent?.id, alternate_urls: form.alternate_urls.split("\n").filter(Boolean), integrations: form.integrations }, allAgents || []);
+    const exactMatch = possibleDuplicates.find((match) => match.exactUrl);
+    let duplicateJustification = "";
+    if (exactMatch) {
+      duplicateJustification = window.prompt(`The URL matches ${exactMatch.resource.name}. Explain why this is a different resource, or Cancel to update the existing record.`) || "";
+      if (!duplicateJustification.trim()) return setError("An exact URL match requires confirmation and a short justification. You can also cancel and update the existing resource.");
+    }
     const deterministic = evaluateGovernance(questionnaire, { accountable_owner_id: form.accountable_owner_id || (!admin ? user.id : null) }, reviewThreshold);
     setChecking(true);
     function saveFailure(stage, technicalError) {
@@ -1990,6 +2089,29 @@ function AgentForm({
       governance_status: deterministic.status,
       status: agent?.status === "retired" ? "retired" : deterministic.status === "cleared" ? "approved" : deterministic.status,
       ...accessValues,
+      logo_url: form.logo_url || null,
+      purpose: form.purpose || form.description,
+      original_creator: form.original_creator || null,
+      use_audience: form.use_audience,
+      commercial_status: form.commercial_status,
+      intended_users: form.intended_users || null,
+      hosted_url: form.hosted_url || form.url || null,
+      alternate_urls: form.alternate_urls.split("\n").map((x) => x.trim()).filter(Boolean),
+      hosting_environment: form.hosting_environment || form.environment,
+      company_controlled_hosting: form.company_controlled_hosting === "" ? null : form.company_controlled_hosting === "true",
+      admin_control_confirmed: form.admin_control_confirmed === "" ? null : form.admin_control_confirmed === "true",
+      integrations: form.integrations.split("\n").map((x) => x.trim()).filter(Boolean),
+      review_date: form.review_date || null,
+      stewardship_status: form.stewardship_status,
+      product_family: form.entry_type === "product" ? form.product_family || null : null,
+      target_market: form.entry_type === "product" ? form.target_market || null : null,
+      target_industries: form.entry_type === "product" ? form.target_industries.split("\n").map((x) => x.trim()).filter(Boolean) : [],
+      demo_url: form.entry_type === "product" ? form.demo_url || null : null,
+      development_stage: form.entry_type === "product" ? form.development_stage : null,
+      pricing_model: form.entry_type === "product" ? form.pricing_model || null : null,
+      documentation_links: form.documentation_links.split("\n").map((x) => x.trim()).filter(Boolean),
+      product_notes: form.entry_type === "product" ? form.product_notes || null : null,
+      lifecycle_relationship: form.lifecycle_relationship,
     };
     const data = { id: agent?.id || crypto.randomUUID() };
     let e1;
@@ -2050,7 +2172,7 @@ function AgentForm({
         id: version.id,
         agent_id: data.id,
         version_number: versionNumber,
-        prompt_text: form.prompt,
+        prompt_text: form.prompt || `Product governance record: ${form.name}. ${form.description}`,
         change_explanation: agent
           ? "Resource details saved and deterministically reassessed."
           : "Initial prompt saved with its deterministic governance assessment.",
@@ -2061,11 +2183,12 @@ function AgentForm({
       return savedWithAttention("prompt history", e2);
     }
     if (admin) {
-      const [removePeople, removeCompanies] = await Promise.all([
+      const [removePeople, removeCompanies, removeDepartments] = await Promise.all([
         supabase.from("agent_user_access").delete().eq("agent_id", data.id),
         supabase.from("agent_company_access").delete().eq("agent_id", data.id),
+        supabase.from("resource_department_access").delete().eq("resource_id", data.id),
       ]);
-      const removalError = removePeople.error || removeCompanies.error;
+      const removalError = removePeople.error || removeCompanies.error || removeDepartments.error;
       if (removalError) {
         return savedWithAttention("access assignments", removalError);
       }
@@ -2075,7 +2198,7 @@ function AgentForm({
         expires_at: accessValues.access_expires_at,
         granted_by: user.id,
       };
-      if (form.access_scope === "specific_people" && authorizedPeople.length) {
+      if (["specific_people","selected_individuals"].includes(form.access_scope) && authorizedPeople.length) {
         const { error: peopleError } = await supabase
           .from("agent_user_access")
           .insert(
@@ -2106,6 +2229,10 @@ function AgentForm({
           return savedWithAttention("company access", companiesError);
         }
       }
+      if (form.access_scope === "selected_departments" && authorizedDepartments.length) {
+        const { error: departmentsError } = await supabase.from("resource_department_access").insert(authorizedDepartments.map((department) => ({ resource_id: data.id, department, ...assignmentValues })));
+        if (departmentsError) return savedWithAttention("department access", departmentsError);
+      }
     }
     const { error: assessmentSaveError } = await supabase.rpc("record_governance_assessment", {
       target_agent: data.id,
@@ -2122,6 +2249,21 @@ function AgentForm({
       target_summary: deterministic.summary,
     });
     if (assessmentSaveError) return savedWithAttention("deterministic assessment", assessmentSaveError);
+    const { error: mappingDeleteError } = await supabase.from("resource_lifecycle_mappings").delete().eq("resource_id", data.id);
+    if (!mappingDeleteError && selectedLifecycleStages.length && ["mapped_to_stage", "supports_multiple_stages"].includes(form.lifecycle_relationship)) {
+      const { error: mappingError } = await supabase.from("resource_lifecycle_mappings").insert(selectedLifecycleStages.map((stageId) => ({ resource_id: data.id, lifecycle_id: lifecycleStages.find((stage) => stage.id === stageId)?.lifecycle_id, stage_id: stageId, mapping_source: "creator", alignment_status: "alignment_needs_clarification", explanation: "Selected by the resource creator; Admin review may confirm or change this mapping.", created_by: user.id })));
+      if (mappingError) console.error("Saved resource lifecycle mapping failed", mappingError);
+    }
+    if (possibleDuplicates.length) {
+      const { error: duplicateError } = await supabase.from("resource_duplicate_matches").upsert(possibleDuplicates.map((match) => ({ resource_id: data.id, matching_resource_id: match.resourceId, match_type: match.matchType, similarity_score: match.score, reasons: match.reasons, normalized_url: match.matchedUrl, creator_resolution: exactMatch ? "continued_creation" : "admin_review_requested", creator_justification: match.exactUrl ? duplicateJustification : null, created_by: user.id })), { onConflict: "resource_id,matching_resource_id,match_type" });
+      if (duplicateError) console.error("Saved resource duplicate analysis failed", duplicateError);
+    }
+    sessionStorage.removeItem("hub-create-type");
+    const guidance = JSON.parse(sessionStorage.getItem("hub-classification-guidance") || "null");
+    if (guidance) {
+      await supabase.from("resource_classification_assessments").insert({ resource_id: data.id, answers: guidance.answers, recommended_classification: guidance.assessment.classification, accepted_classification: guidance.accepted, override_explanation: guidance.reason || null, technical_support_recommended: guidance.assessment.technicalSupport, explanation: guidance.assessment.explanation, next_steps: guidance.assessment.nextSteps, governance_considerations: guidance.assessment.governance, created_by: user.id });
+      sessionStorage.removeItem("hub-classification-guidance");
+    }
     setChecking(false);
     saved(deterministic.status === "cleared" ? "Your resource was saved and cleared. Review the recommendations below to strengthen its governance." : deterministic.status === "assessment_pending" ? "Your resource was saved. Complete the missing governance information before publication." : "Your resource was saved and sent to Admin review because its risk score or a required safeguard needs attention.", deterministic);
   }
@@ -2143,7 +2285,7 @@ function AgentForm({
         {step === 1 && <>
         <label>
           Resource Type
-          <FieldHelp>Select whether you are registering an AI agent, a reusable skillset, or an AI platform available to the organization.</FieldHelp>
+          <FieldHelp>Select Agent, Skillset, Platform, or a commercial or strategic Product in the Lead Ventures suite.</FieldHelp>
           <select
             value={form.entry_type}
             onChange={(e) => set("entry_type", e.target.value)}
@@ -2151,6 +2293,7 @@ function AgentForm({
             <option value="agent">Agent</option>
             <option value="skillset">Skillset</option>
             <option value="platform">Platform</option>
+            <option value="product">Product</option>
           </select>
         </label>
         <label>
@@ -2325,6 +2468,45 @@ function AgentForm({
             onChange={(e) => set("url", e.target.value)}
           />
         </label>
+        <label>
+          Resource logo URL
+          <FieldHelp>Use an approved logo asset. The shared Lead Ventures logo remains the application logo.</FieldHelp>
+          <input type="url" value={form.logo_url} onChange={(e) => set("logo_url", e.target.value)} />
+        </label>
+        <label>
+          Original creator or contributors
+          <FieldHelp>Creator attribution remains visible even when the company owns and administers the resource.</FieldHelp>
+          <input value={form.original_creator} onChange={(e) => set("original_creator", e.target.value)} />
+        </label>
+        <label>
+          Intended users or customers
+          <input value={form.intended_users} onChange={(e) => set("intended_users", e.target.value)} />
+        </label>
+        <label>
+          Internal or external use
+          <select value={form.use_audience} onChange={(e) => set("use_audience", e.target.value)}><option value="internal">Internal</option><option value="external">External</option><option value="both">Both</option></select>
+        </label>
+        <label>
+          Company Stewardship
+          <select value={form.stewardship_status} onChange={(e) => set("stewardship_status", e.target.value)}><option value="verified_company_controlled">Verified company-controlled</option><option value="migration_needed">Migration needed</option><option value="ownership_needs_verification">Ownership needs verification</option><option value="hosting_needs_verification">Hosting needs verification</option></select>
+        </label>
+        <label>
+          Company-controlled hosting
+          <select value={form.company_controlled_hosting} onChange={(e) => set("company_controlled_hosting", e.target.value)}><option value="">Needs verification</option><option value="true">Yes</option><option value="false">No</option></select>
+        </label>
+        <label>
+          Company has administrative control
+          <select value={form.admin_control_confirmed} onChange={(e) => set("admin_control_confirmed", e.target.value)}><option value="">Needs verification</option><option value="true">Yes</option><option value="false">No</option></select>
+        </label>
+        <label>
+          Review date
+          <input type="date" value={form.review_date} onChange={(e) => set("review_date", e.target.value)} />
+        </label>
+        <label className="full">Integrations and dependencies (one per line)<textarea value={form.integrations} onChange={(e) => set("integrations", e.target.value)} /></label>
+        <label className="full">Alternate URLs (one per line)<textarea value={form.alternate_urls} onChange={(e) => set("alternate_urls", e.target.value)} /></label>
+        <label className="full">Operational lifecycle relationship<select value={form.lifecycle_relationship} onChange={(e) => set("lifecycle_relationship", e.target.value)}><option value="mapped_to_stage">Mapped to lifecycle stage</option><option value="supports_multiple_stages">Supports multiple lifecycle stages</option><option value="supports_company_generally">Supports the company generally</option><option value="standalone_lead_ventures_product">Standalone Lead Ventures product</option><option value="not_applicable">Not applicable</option><option value="not_yet_evaluated">Not yet evaluated</option></select><FieldHelp>Lifecycle alignment is optional and is never used to increase governance risk.</FieldHelp></label>
+        {["mapped_to_stage","supports_multiple_stages"].includes(form.lifecycle_relationship) && <fieldset className="full lifecycle-stage-picker"><legend>Company, lifecycle, phase, and stage</legend>{lifecycles.filter((lifecycle) => lifecycle.company_id === form.company_id && lifecycle.status !== "archived").map((lifecycle) => <div key={lifecycle.id}><b>{companies.find((company) => company.id === lifecycle.company_id)?.name} · {lifecycle.name}</b>{lifecycleStages.filter((stage) => stage.lifecycle_id === lifecycle.id).map((stage) => <label key={stage.id}><input type="checkbox" checked={selectedLifecycleStages.includes(stage.id)} onChange={(e) => setSelectedLifecycleStages((current) => e.target.checked ? [...current, stage.id] : current.filter((id) => id !== stage.id))}/>{stage.stage_number ? `${stage.stage_number}. ` : ""}{stage.name}</label>)}</div>)}</fieldset>}
+        {form.entry_type === "product" && <fieldset className="full platform-fields"><legend>Product information</legend><label>Product family or suite<input value={form.product_family} onChange={(e) => set("product_family", e.target.value)} /></label><label>Commercial status<select value={form.commercial_status} onChange={(e) => set("commercial_status", e.target.value)}>{[["internal_only","Internal only"],["evaluating_commercial_potential","Evaluating commercial potential"],["planned_commercial_product","Planned commercial product"],["pilot","Pilot"],["commercially_available","Commercially available"],["retired","Retired"]].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label>Development stage<select value={form.development_stage} onChange={(e) => set("development_stage", e.target.value)}>{["concept","discovery","mvp","pilot","production","scaling","retired"].map(value=><option key={value} value={value}>{value.toUpperCase()}</option>)}</select></label><label>Demo URL<input type="url" value={form.demo_url} onChange={(e) => set("demo_url", e.target.value)} /></label><label className="full">Target market and industries<textarea value={`${form.target_market}${form.target_industries ? `\n${form.target_industries}` : ""}`} onChange={(e) => { const [market,...industries]=e.target.value.split("\n"); setForm(current=>({...current,target_market:market,target_industries:industries.join("\n")})); }} /></label><label className="full">Pricing or revenue model<textarea value={form.pricing_model} onChange={(e) => set("pricing_model", e.target.value)} /></label><label className="full">Notes<textarea value={form.product_notes} onChange={(e) => set("product_notes", e.target.value)} /></label><label className="full">Documentation links (one per line)<textarea value={form.documentation_links} onChange={(e) => set("documentation_links", e.target.value)} /></label></fieldset>}
         {form.entry_type === "platform" && (
           <fieldset className="full platform-fields">
             <legend>Platform details</legend>
@@ -2415,7 +2597,7 @@ function AgentForm({
           </p>
           <label>
             Access scope
-            <FieldHelp>Choose the audience that can discover this repository resource.</FieldHelp>
+            <FieldHelp>Choose the audience that can discover this Hub resource.</FieldHelp>
             <select
               value={form.access_scope}
               disabled={!admin}
@@ -2426,6 +2608,9 @@ function AgentForm({
               <option value="admins_only">Admins Only</option>
               <option value="selected_companies">Selected Companies</option>
               <option value="entire_team">Entire Team</option>
+              <option value="entire_company">Entire Company</option>
+              <option value="selected_departments">Selected Departments</option>
+              <option value="selected_individuals">Selected Individuals</option>
             </select>
           </label>
           <label>
@@ -2441,7 +2626,7 @@ function AgentForm({
               <option value="manage">Manage</option>
             </select>
           </label>
-          {admin && form.access_scope === "specific_people" && (
+          {admin && ["specific_people","selected_individuals"].includes(form.access_scope) && (
             <SearchableMultiSelect
               label="Authorized people"
               help="Search active users and select one or more people. Hold Ctrl or Command to select multiple entries."
@@ -2453,6 +2638,9 @@ function AgentForm({
               selected={authorizedPeople}
               setSelected={setAuthorizedPeople}
             />
+          )}
+          {admin && form.access_scope === "selected_departments" && (
+            <SearchableMultiSelect label="Authorized departments" help="Select one or more departments whose active users may retrieve this resource." options={activeDepartments.map((department) => ({ value: department.name, label: department.name, searchable: department.name }))} selected={authorizedDepartments} setSelected={setAuthorizedDepartments} />
           )}
           {admin && form.access_scope === "selected_companies" && (
             <SearchableMultiSelect
@@ -2514,10 +2702,11 @@ function AgentForm({
           Initial prompt
           <FieldHelp>Enter the current system instructions or primary prompt. Do not include passwords, API keys, confidential customer information, or other secrets.</FieldHelp>
           <textarea
-            required
+            required={form.entry_type !== "product"}
             value={form.prompt}
             onChange={(e) => set("prompt", e.target.value)}
           />
+          {form.entry_type === "product" && <FieldHelp>A Product may be assessed from its documented purpose when it does not use a reusable AI prompt.</FieldHelp>}
         </label>
         <section className="full review-summary">
           <h3>Review before submitting</h3>
@@ -3016,7 +3205,7 @@ function AccessManagement({
       <PageHead
         tag="ADMINISTRATION"
         title="Access Management"
-        desc="Control repository discovery and usage for every agent, skillset, and platform."
+        desc="Control The Hub discovery and usage for every Agent, Skillset, Platform, and Product."
       />
       <div className="external-access-banner">
         <b>Registry access is separate from platform access.</b>
@@ -3169,7 +3358,7 @@ function TaxonomyList({ title, table, rows, user, reload }) {
     </section>
   );
 }
-function Users({ rows, companies, admin, session, reload }) {
+function Users({ rows, companies, departments, admin, session, reload }) {
   const [message, setMessage] = useState(""),
     [syncing, setSyncing] = useState(false),
     [syncComplete, setSyncComplete] = useState(false);
@@ -3240,6 +3429,7 @@ function Users({ rows, companies, admin, session, reload }) {
               <tr>
                 <th>User</th>
                 <th>Company</th>
+                <th>Department</th>
                 <th>Role</th>
                 <th>Status</th>
               </tr>
@@ -3251,6 +3441,7 @@ function Users({ rows, companies, admin, session, reload }) {
                     <b>{u.full_name || "New user"}</b>
                     <small>{u.email}</small>
                   </td>
+                  <td><select value={u.department || ""} onChange={(e) => update(u.id, { department: e.target.value || null })}><option value="">Unassigned</option>{departments.filter((department) => department.status === "active").map((department) => <option key={department.id} value={department.name}>{department.name}</option>)}</select></td>
                   <td>
                     <select
                       value={u.company_id || ""}
@@ -3381,8 +3572,8 @@ const Empty = ({ title, text, action }) => (
 const Logo = () => (
   <img
     className="logo"
-    src="https://www.lead-ventures.com/wp-content/uploads/2023/03/LV-logo.png"
-    alt="Lead Ventures Agents & Platform Repository"
+    src={APP_LOGO_URL}
+    alt={APP_LOGO_ALT}
   />
 );
 const Splash = ({ text }) => (
@@ -3418,7 +3609,13 @@ function Tour({ role, setView, close }) {
       view: "dashboard",
       eyebrow: "WELCOME",
       title: "Build boldly. Govern intelligently.",
-      text: "The Dashboard focuses on approved resources available to you, totals by resource type, company distribution, accountable ownership, and recently added resources—not access-administration metrics.",
+      text: "The Hub – Powering Lead Ventures is the proprietary, centralized source of truth for authorized company resources and operational lifecycles.",
+    },
+    {
+      view: "dashboard",
+      eyebrow: "START HERE",
+      title: "Choose the right creation path",
+      text: "Answer plain-language questions to receive a deterministic Agent, Skillset, Platform, or Product recommendation and suggested next steps.",
     },
     {
       view: "agents",
@@ -3427,19 +3624,31 @@ function Tour({ role, setView, close }) {
       text:
         role === "viewer"
           ? "You can inspect registered agents, reusable skillsets, approved platforms, ownership, access, and governance status."
-          : "Choose Agent, Skillset, or Platform. Editors and Admins receive field-level guidance, an editable suggested name, and their own name as the default accountable owner.",
+          : "Choose Agent, Skillset, Platform, or Product. Editors and Admins receive field-level guidance, an editable suggested name, and their own name as the default accountable owner.",
     },
     {
       view: "my-agents",
       eyebrow: "PERSONALIZED ACCESS",
       title: "Your available AI resources",
-      text: "My Agents & Platforms contains resources available to you based on your role, ownership, and explicit access assignments. Availability does not create a license or user account in an external platform; follow its access instructions.",
+      text: "My Resources contains authorized Agents, Skillsets, Platforms, and Products based on your role, ownership, and explicit access assignments.",
     },
     {
       view: "agents",
       eyebrow: "SOURCE OF TRUTH",
-      title: "Agents & Platform Directory",
+      title: "Resource Directory",
       text: "Use Columns to choose the fields shown in your directory; the preference follows your user profile with a browser fallback. Resource descriptions stay compact, and mobile screens use cards with the essential actions.",
+    },
+    {
+      view: "products",
+      eyebrow: "PRODUCT SUITE",
+      title: "Connect strategic and commercial offerings",
+      text: "Products can contain or depend on other Hub resources. Product-suite membership, lifecycle alignment, and governance risk remain separate concepts.",
+    },
+    {
+      view: "lifecycles",
+      eyebrow: "OPERATIONAL LIFECYCLES",
+      title: "See how company work moves",
+      text: "Record-driven lifecycle viewers reveal mapped resources, gaps, overlaps, nested journeys, and feedback paths, with an accessible list alternative.",
     },
     {
       view: "governance",
@@ -3459,7 +3668,7 @@ function Tour({ role, setView, close }) {
             view: "users",
             eyebrow: "ADMIN NAVIGATION",
             title: "Expand the Admin section",
-            text: "Admins can expand or collapse one organized navigation section containing Users & Access, Companies, Departments & Categories, Access Management, and AI & Governance Settings. The default review threshold is 40% and affects future assessments only.",
+            text: "Admins manage users, companies, taxonomy, access, operational lifecycles, Potential Duplicates, and advisory AI settings from one expandable section.",
           },
           {
             view: "users",
@@ -3484,6 +3693,12 @@ function Tour({ role, setView, close }) {
             eyebrow: "RESOURCE ACCESS",
             title: "Control discovery and use",
             text: "Access Management allows you to make a resource available to the entire team, all Admins, selected companies, or specific people. External platform permissions must still be confirmed separately.",
+          },
+          {
+            view: "duplicates",
+            eyebrow: "DUPLICATE DETECTION",
+            title: "Review possible overlaps separately",
+            text: "Normalized URLs and deterministic keyword similarity create a separate consolidation queue. Warnings never silently block saving and do not increase governance risk.",
           },
           {
             view: "settings",
@@ -3515,7 +3730,7 @@ function Tour({ role, setView, close }) {
       className="tour-layer"
       role="dialog"
       aria-modal="true"
-      aria-label="Agents and Platform Repository tour"
+      aria-label="The Hub – Powering Lead Ventures tour"
     >
       <div className="tour-card">
         <button className="tour-close" onClick={close} aria-label="Close tour">

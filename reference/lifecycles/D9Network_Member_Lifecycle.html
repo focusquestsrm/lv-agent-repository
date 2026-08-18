@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The D9Network Member Lifecycle</title>
+<style>
+  :root{
+    --navy:#1B2A4A;
+    --navy-deep:#101B31;
+    --ink:#0A1222;
+    --orange:#E06B1F;
+    --gold:#B8821E;
+    --parchment:#F5F2EC;
+    --rule:#D9D2C4;
+    --body-ink:#2A3547;
+    --muted:#6B7689;
+
+    --apa:#BD8C09; --aka:#EF939E; --kap:#B11F29; --opp:#612D8A; --dst:#BE1F2C;
+    --pbs:#0055A5; --zpb:#1A468D; --sgr:#D1A218; --ipt:#462516;
+
+    --display:Georgia,"Times New Roman",serif;
+    --body:Calibri,"Open Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--parchment);
+    color:var(--body-ink);
+    font-family:var(--body);
+    font-size:17px;
+    line-height:1.6;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:0 28px}
+
+  /* ---------- masthead ---------- */
+  .masthead{background:var(--navy-deep);color:#fff;padding:0 0 4px}
+  .starstrip{display:flex;height:6px}
+  .starstrip span{flex:1}
+  .eyebrow{
+    font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--gold);margin:44px 0 14px;font-weight:600;
+  }
+  .masthead h1{
+    font-family:var(--display);font-weight:400;
+    font-size:clamp(34px,6vw,60px);line-height:1.08;
+    margin:0 0 18px;color:#fff;letter-spacing:-.01em;
+  }
+  .masthead h1 em{font-style:italic;color:var(--orange)}
+  .deck{
+    max-width:660px;color:#C6CEDC;font-size:19px;margin:0 0 12px;
+  }
+  .meta{
+    display:flex;flex-wrap:wrap;gap:26px;border-top:1px solid rgba(255,255,255,.14);
+    margin-top:38px;padding:18px 0 34px;font-size:13px;color:#8D9AB1;
+  }
+  .meta b{display:block;color:#E8EBF1;font-weight:600;letter-spacing:.04em;
+    text-transform:uppercase;font-size:11px;margin-bottom:3px}
+
+  /* ---------- cycle stage ---------- */
+  .cyclewrap{background:var(--navy);color:#fff;padding:56px 0 64px}
+  .cyclegrid{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:start}
+  svg.ring{width:100%;height:auto;display:block}
+
+  .node{cursor:pointer}
+  .node circle.disc{fill:var(--navy-deep);stroke:rgba(255,255,255,.32);stroke-width:2;transition:all .25s ease}
+  .node text.num{font-family:var(--display);font-size:26px;fill:#fff;text-anchor:middle;dominant-baseline:central}
+  .node text.lbl{font-family:var(--body);font-size:15px;font-weight:700;letter-spacing:.13em;fill:#AFBACD;transition:fill .25s ease}
+  .node:hover circle.disc{stroke:var(--gold)}
+  .node:hover text.lbl{fill:#fff}
+  .node:focus{outline:none}
+  .node:focus circle.disc{stroke:var(--orange);stroke-width:3}
+  .node.on circle.disc{fill:var(--orange);stroke:#fff;stroke-width:3}
+  .node.on text.lbl{fill:#fff}
+
+  /* ---------- detail panel ---------- */
+  .panel{
+    background:var(--parchment);color:var(--body-ink);
+    border-top:5px solid var(--orange);
+    padding:32px 34px 34px;position:sticky;top:24px;
+  }
+  .panel .tag{
+    font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--orange);font-weight:700;
+  }
+  .panel h2{
+    font-family:var(--display);font-weight:400;font-size:34px;
+    margin:8px 0 4px;color:var(--navy);
+  }
+  .panel .tier{
+    font-size:13px;letter-spacing:.06em;color:var(--muted);
+    padding-bottom:20px;border-bottom:1px solid var(--rule);margin-bottom:20px;
+  }
+  .panel .tier b{color:var(--gold);font-weight:700}
+  .field{margin-bottom:17px}
+  .field h3{
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 4px;font-weight:700;
+  }
+  .field p{margin:0;font-size:15.5px;line-height:1.55}
+  .leak{background:#fff;border-left:3px solid var(--kap,#B11F29);padding:12px 15px;margin-top:20px}
+  .leak h3{color:#B11F29}
+  .leak p{font-size:15px}
+
+  .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px}
+  .pills button{
+    font-family:var(--body);font-size:13px;font-weight:600;letter-spacing:.04em;
+    background:transparent;color:#AFBACD;border:1px solid rgba(255,255,255,.2);
+    padding:7px 13px;cursor:pointer;transition:all .2s;
+  }
+  .pills button:hover{border-color:var(--gold);color:#fff}
+  .pills button[aria-selected="true"]{background:var(--orange);border-color:var(--orange);color:#fff}
+
+  /* ---------- light sections ---------- */
+  section.light{padding:66px 0}
+  .sechead{max-width:640px;margin-bottom:36px}
+  .sechead .kicker{
+    font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--orange);font-weight:700;margin-bottom:10px;
+  }
+  .sechead h2{
+    font-family:var(--display);font-weight:400;font-size:clamp(28px,4vw,40px);
+    color:var(--navy);margin:0 0 12px;line-height:1.15;
+  }
+  .sechead p{margin:0;color:var(--muted);font-size:17px}
+
+  /* tier ladder */
+  .ladder{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:1px solid var(--rule);background:#fff}
+  .rung{padding:24px 20px 26px;border-right:1px solid var(--rule);position:relative}
+  .rung:last-child{border-right:none}
+  .rung .bar{height:4px;margin:-24px -20px 20px;background:var(--rule)}
+  .rung h3{font-family:var(--display);font-weight:400;font-size:22px;color:var(--navy);margin:0 0 2px}
+  .rung .verb{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);font-weight:700;margin-bottom:12px}
+  .rung p{font-size:14.5px;margin:0 0 12px;line-height:1.5;color:var(--body-ink)}
+  .rung .stages{font-size:12px;color:var(--muted);border-top:1px solid var(--rule);padding-top:10px;letter-spacing:.03em}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--rule);font-size:14.5px}
+  caption{text-align:left;font-size:13px;color:var(--muted);padding-bottom:10px}
+  th{
+    background:var(--navy);color:#fff;text-align:left;padding:12px 14px;
+    font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;
+  }
+  td{padding:12px 14px;border-top:1px solid var(--rule);vertical-align:top}
+  tbody tr:nth-child(even){background:#FBF9F5}
+  td.stage{font-weight:700;color:var(--navy);white-space:nowrap}
+  td.metric{color:var(--navy);font-weight:600}
+
+  /* loops */
+  .loops{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .loop{background:#fff;border:1px solid var(--rule);border-top:4px solid var(--gold);padding:26px 24px}
+  .loop .n{font-family:var(--display);font-size:15px;color:var(--gold);letter-spacing:.1em}
+  .loop h3{font-family:var(--display);font-weight:400;font-size:23px;color:var(--navy);margin:6px 0 10px}
+  .loop p{font-size:15px;margin:0 0 14px}
+  .loop .path{font-size:13px;color:var(--muted);border-top:1px solid var(--rule);padding-top:12px}
+  .loop .path b{color:var(--orange);font-weight:700}
+
+  footer{background:var(--navy-deep);color:#8D9AB1;padding:34px 0;font-size:13px}
+  footer .starstrip{margin-bottom:26px}
+  footer b{color:#E8EBF1}
+
+  @media (max-width:900px){
+    .cyclegrid{grid-template-columns:1fr;gap:30px}
+    .panel{position:static}
+    .ladder{grid-template-columns:1fr;}
+    .rung{border-right:none;border-bottom:1px solid var(--rule)}
+    .rung:last-child{border-bottom:none}
+    .rung .bar{margin:-24px -20px 20px}
+    .loops{grid-template-columns:1fr}
+    .wrap{padding:0 20px}
+    table{font-size:13.5px}
+    th,td{padding:10px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="starstrip" aria-hidden="true">
+    <span style="background:var(--apa)"></span><span style="background:var(--aka)"></span>
+    <span style="background:var(--kap)"></span><span style="background:var(--opp)"></span>
+    <span style="background:var(--dst)"></span><span style="background:var(--pbs)"></span>
+    <span style="background:var(--zpb)"></span><span style="background:var(--sgr)"></span>
+    <span style="background:var(--ipt)"></span>
+  </div>
+  <div class="wrap">
+    <div class="eyebrow">The D9Network LLC &middot; Operating Framework</div>
+    <h1>The Member <em>Lifecycle</em></h1>
+    <p class="deck">Seven stages that carry a Divine Nine professional from first contact to lifetime advocate — and the loops that bring them back when the line breaks.</p>
+    <div class="meta">
+      <div><b>Prepared for</b>Sean Reed-McGee, Founder &amp; CEO</div>
+      <div><b>Applies to</b>Membership, Chamber, Growth Kit</div>
+      <div><b>Systems</b>Brilliant Directories &middot; Supabase &middot; GoHighLevel &middot; Resend</div>
+    </div>
+  </div>
+</header>
+
+<div class="cyclewrap">
+  <div class="wrap">
+    <div class="cyclegrid">
+      <div>
+        <svg class="ring" viewBox="0 0 800 680" role="img" aria-label="Circular diagram of the seven D9Network member lifecycle stages">
+          <!-- outer track -->
+          <circle cx="400" cy="330" r="215" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="2"/>
+
+          <!-- recovery loop, inner -->
+          <path d="M 306.7 523.7 A 150 150 0 0 1 231.9 195.9" fill="none"
+                stroke="#E06B1F" stroke-width="2" stroke-dasharray="7 7" opacity="0.85"/>
+          <text x="205" y="345" text-anchor="middle" fill="#E06B1F" font-family="Calibri,sans-serif"
+                font-size="11.5" font-weight="700" letter-spacing="1.6" transform="rotate(-90 205 345)">RECOVERY LOOP</text>
+
+          <!-- direction chevrons -->
+          <g fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="-5,-6 3,0 -5,6" transform="translate(493.3,136.3) rotate(25.71)"/>
+            <polyline points="-5,-6 3,0 -5,6" transform="translate(609.6,282.2) rotate(77.14)"/>
+            <polyline points="-5,-6 3,0 -5,6" transform="translate(568.1,464.1) rotate(128.57)"/>
+            <polyline points="-5,-6 3,0 -5,6" transform="translate(400,545) rotate(180)"/>
+            <polyline points="-5,-6 3,0 -5,6" transform="translate(231.9,464.1) rotate(231.43)"/>
+            <polyline points="-5,-6 3,0 -5,6" transform="translate(190.4,282.2) rotate(282.86)"/>
+            <polyline points="-5,-6 3,0 -5,6" transform="translate(306.7,136.3) rotate(334.29)"/>
+          </g>
+
+          <!-- center mark -->
+          <g>
+            <g fill="none" stroke-width="0">
+              <circle cx="352" cy="279" r="4.5" fill="#BD8C09"/>
+              <circle cx="368" cy="273" r="4.5" fill="#EF939E"/>
+              <circle cx="384" cy="269.5" r="4.5" fill="#B11F29"/>
+              <circle cx="400" cy="268.5" r="4.5" fill="#612D8A"/>
+              <circle cx="416" cy="269.5" r="4.5" fill="#BE1F2C"/>
+              <circle cx="432" cy="273" r="4.5" fill="#0055A5"/>
+              <circle cx="448" cy="279" r="4.5" fill="#1A468D"/>
+              <circle cx="336" cy="287" r="4.5" fill="#D1A218"/>
+              <circle cx="464" cy="287" r="4.5" fill="#462516"/>
+            </g>
+            <text x="400" y="325" text-anchor="middle" fill="#FFFFFF" font-family="Georgia,serif" font-size="27">D9NETWORK</text>
+            <text x="400" y="356" text-anchor="middle" fill="#B8821E" font-family="Calibri,sans-serif"
+                  font-size="13" font-weight="700" letter-spacing="4.5">MEMBER LIFECYCLE</text>
+            <line x1="330" y1="378" x2="470" y2="378" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+            <text x="400" y="400" text-anchor="middle" fill="#8D9AB1" font-family="Calibri,sans-serif"
+                  font-size="12.5">Select a stage</text>
+          </g>
+
+          <!-- nodes -->
+          <g class="node" data-i="0" tabindex="0" role="button" aria-label="Stage 1, Discover">
+            <circle class="disc" cx="400" cy="115" r="34"/>
+            <text class="num" x="400" y="115">1</text>
+            <text class="lbl" x="400" y="55" text-anchor="middle">DISCOVER</text>
+          </g>
+          <g class="node" data-i="1" tabindex="0" role="button" aria-label="Stage 2, Join">
+            <circle class="disc" cx="568.1" cy="195.9" r="34"/>
+            <text class="num" x="568.1" y="195.9">2</text>
+            <text class="lbl" x="613" y="167" text-anchor="start">JOIN</text>
+          </g>
+          <g class="node" data-i="2" tabindex="0" role="button" aria-label="Stage 3, Activate">
+            <circle class="disc" cx="609.6" cy="377.8" r="34"/>
+            <text class="num" x="609.6" y="377.8">3</text>
+            <text class="lbl" x="654" y="383" text-anchor="start">ACTIVATE</text>
+          </g>
+          <g class="node" data-i="3" tabindex="0" role="button" aria-label="Stage 4, Engage">
+            <circle class="disc" cx="493.3" cy="523.7" r="34"/>
+            <text class="num" x="493.3" y="523.7">4</text>
+            <text class="lbl" x="533" y="573" text-anchor="start">ENGAGE</text>
+          </g>
+          <g class="node" data-i="4" tabindex="0" role="button" aria-label="Stage 5, Upgrade">
+            <circle class="disc" cx="306.7" cy="523.7" r="34"/>
+            <text class="num" x="306.7" y="523.7">5</text>
+            <text class="lbl" x="267" y="573" text-anchor="end">UPGRADE</text>
+          </g>
+          <g class="node" data-i="5" tabindex="0" role="button" aria-label="Stage 6, Advocate">
+            <circle class="disc" cx="190.4" cy="377.8" r="34"/>
+            <text class="num" x="190.4" y="377.8">6</text>
+            <text class="lbl" x="146" y="383" text-anchor="end">ADVOCATE</text>
+          </g>
+          <g class="node" data-i="6" tabindex="0" role="button" aria-label="Stage 7, Renew or Recover">
+            <circle class="disc" cx="231.9" cy="195.9" r="34"/>
+            <text class="num" x="231.9" y="195.9">7</text>
+            <text class="lbl" x="187" y="167" text-anchor="end">RENEW</text>
+          </g>
+        </svg>
+
+        <div class="pills" role="tablist" aria-label="Lifecycle stages"></div>
+      </div>
+
+      <div class="panel" id="panel" role="region" aria-live="polite">
+        <!-- injected -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="light">
+  <div class="wrap">
+    <div class="sechead">
+      <div class="kicker">Where the cycle meets the price list</div>
+      <h2>The lifecycle and the tier ladder are the same story</h2>
+      <p>Every tier answers a different question a member is asking at that point in the cycle. If a tier does not answer a live question, it will not sell.</p>
+    </div>
+    <div class="ladder">
+      <div class="rung">
+        <div class="bar" style="background:#8A94A6"></div>
+        <h3>Bronze</h3>
+        <div class="verb">Discover</div>
+        <p>Get listed, get verified, and see what the network holds. Everything premium is visible but locked — the lock is the pitch.</p>
+        <div class="stages">Stages 1&ndash;3</div>
+      </div>
+      <div class="rung">
+        <div class="bar" style="background:#B8821E"></div>
+        <h3>Bronze Plus</h3>
+        <div class="verb">Build visibility</div>
+        <p>A profile people can actually find. Enhanced listing, directory placement, and the first working AI tools.</p>
+        <div class="stages">Stages 3&ndash;4</div>
+      </div>
+      <div class="rung">
+        <div class="bar" style="background:#E06B1F"></div>
+        <h3>Silver</h3>
+        <div class="verb">Grow</div>
+        <p>Lead flow and reach. Spotlight placement, the full prompt library, and priority in member-to-member referrals.</p>
+        <div class="stages">Stages 4&ndash;5</div>
+      </div>
+      <div class="rung">
+        <div class="bar" style="background:#1B2A4A"></div>
+        <h3>Gold</h3>
+        <div class="verb">Compete</div>
+        <p>Opportunity discovery, referral matching, and a growth advisor. This is where the member starts winning business through D9N.</p>
+        <div class="stages">Stage 5</div>
+      </div>
+      <div class="rung">
+        <div class="bar" style="background:#101B31"></div>
+        <h3>Platinum</h3>
+        <div class="verb">Scale and lead</div>
+        <p>The full automated suite plus human-brokered introductions and concierge support. Platinum members become the advocates.</p>
+        <div class="stages">Stages 5&ndash;6</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="light" style="padding-top:0">
+  <div class="wrap">
+    <div class="sechead">
+      <div class="kicker">Ownership and instrumentation</div>
+      <h2>One owner, one system, one number per stage</h2>
+      <p>A stage nobody owns is a stage nobody fixes. A stage nobody measures is a stage that quietly leaks.</p>
+    </div>
+    <table>
+      <caption>System of record determines which dashboard panel should carry the number.</caption>
+      <thead>
+        <tr><th scope="col">Stage</th><th scope="col">Owner</th><th scope="col">System of record</th><th scope="col">The one number</th></tr>
+      </thead>
+      <tbody id="opsbody"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="light" style="padding-top:0">
+  <div class="wrap">
+    <div class="sechead">
+      <div class="kicker">The mechanics</div>
+      <h2>Three loops keep the cycle turning</h2>
+      <p>A lifecycle is not a funnel with the ends taped together. These are the three feedback paths that decide whether the network compounds or slowly drains.</p>
+    </div>
+    <div class="loops">
+      <div class="loop">
+        <div class="n">LOOP ONE</div>
+        <h3>Activation</h3>
+        <p>A member who completes a profile and runs one AI prompt in the first week is a member who renews. Everything in onboarding should point at those two actions and nothing else.</p>
+        <div class="path"><b>Join → Activate → Engage</b></div>
+      </div>
+      <div class="loop">
+        <div class="n">LOOP TWO</div>
+        <h3>Referral</h3>
+        <p>Advocates recruit at a fraction of the cost of paid acquisition and bring members who already trust the brand. Each org needs named ambassadors, and their referrals need to be attributable.</p>
+        <div class="path"><b>Advocate → Discover → Join</b></div>
+      </div>
+      <div class="loop">
+        <div class="n">LOOP THREE</div>
+        <h3>Recovery</h3>
+        <p>Past-due is not churn yet. A failed card recovered in ten days costs a sequence of three emails; the same member reacquired in six months costs a full acquisition cycle.</p>
+        <div class="path"><b>Renew → Engage</b> &middot; the dashed line</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="starstrip" aria-hidden="true">
+    <span style="background:var(--apa)"></span><span style="background:var(--aka)"></span>
+    <span style="background:var(--kap)"></span><span style="background:var(--opp)"></span>
+    <span style="background:var(--dst)"></span><span style="background:var(--pbs)"></span>
+    <span style="background:var(--zpb)"></span><span style="background:var(--sgr)"></span>
+    <span style="background:var(--ipt)"></span>
+  </div>
+  <div class="wrap">
+    <b>The D9Network LLC</b> &nbsp;&middot;&nbsp; Member Lifecycle Framework &nbsp;&middot;&nbsp; Internal working document, for review
+  </div>
+</footer>
+
+<script>
+const STAGES = [
+  {
+    n:"Discover", tier:"Prospect", tag:"Stage 1",
+    what:"A Divine Nine member or D9-affiliated business owner encounters D9Network for the first time — at a chapter event, through a partner publication, from another member, or through search.",
+    trigger:"Leaves an email address or starts an account.",
+    owner:"Marketing &middot; Sean",
+    system:"GoHighLevel &middot; site analytics",
+    metric:"Qualified leads by source",
+    leak:"Traffic arrives with no way to confirm D9 affiliation, so unqualified leads sit in the pipeline and distort every conversion rate downstream."
+  },
+  {
+    n:"Join", tier:"Bronze", tag:"Stage 2",
+    what:"The member creates an account, selects their organization and chapter, and their affiliation is verified. They land on Bronze by default.",
+    trigger:"Account created and affiliation verified.",
+    owner:"Membership operations &middot; Tina",
+    system:"Brilliant Directories → Supabase",
+    metric:"Signup to verified-member rate",
+    leak:"Profiles that are created but never claimed sit in limbo — counted as members in the totals, but never activated and never billed."
+  },
+  {
+    n:"Activate", tier:"Bronze / Bronze Plus", tag:"Stage 3",
+    what:"The first thirty days. The member completes their business profile, uploads a logo, appears in the directory, and signs into the AI Business Growth Kit for the first time.",
+    trigger:"Profile complete and first prompt run.",
+    owner:"Member success",
+    system:"BD profile fields &middot; Growth Kit auth log",
+    metric:"Percent profile-complete by day 30",
+    leak:"A member joins, never fills out the profile, and stays invisible in the directory. Nothing has happened that would justify a renewal."
+  },
+  {
+    n:"Engage", tier:"Bronze Plus / Silver", tag:"Stage 4",
+    what:"Recurring use. Directory searches, newsletter opens, event attendance, AI prompts run, referrals given and received, spotlight submissions.",
+    trigger:"Hits a locked feature they want.",
+    owner:"Content and community",
+    system:"Supabase engagement events &middot; Resend",
+    metric:"Monthly active share of paid members",
+    leak:"Sixty days of silence is the strongest churn signal in the data — and today nothing fires when it happens."
+  },
+  {
+    n:"Upgrade", tier:"Silver → Gold → Platinum", tag:"Stage 5",
+    what:"The member moves up the ladder because they want visibility, lead flow, or brokered introductions that the current tier does not include.",
+    trigger:"Plan change processed in Brilliant Directories.",
+    owner:"Sean &middot; membership sales",
+    system:"BD subscriptions &middot; revenue by tier",
+    metric:"Tier conversion rate and ARPU",
+    leak:"Locked content with no clear price or benefit story next to it. The member never learns what upgrading buys, so they stall at Bronze permanently."
+  },
+  {
+    n:"Advocate", tier:"Gold / Platinum", tag:"Stage 6",
+    what:"The member starts creating value for the network: referring others, serving as an org ambassador, giving testimonials, speaking at events, recruiting their chapter.",
+    trigger:"First attributed referral or ambassador role accepted.",
+    owner:"Ambassador program",
+    system:"Ambassador roster &middot; referral attribution",
+    metric:"Referred signups per ambassador",
+    leak:"Advocacy that is never recognized or counted. Ambassadors go dormant because nobody tells them their referrals landed."
+  },
+  {
+    n:"Renew or Recover", tier:"All tiers", tag:"Stage 7",
+    what:"The renewal decision, the dunning sequence for failed payments, the cancellation, and the win-back. Every member reaches this stage; the question is which way they exit it.",
+    trigger:"Renewal succeeds, payment recovers, or the member churns.",
+    owner:"Membership operations &middot; finance",
+    system:"BD billing &middot; nightly Supabase snapshot",
+    metric:"Net revenue retention",
+    leak:"Cancelled and past-due accounts still counted in the member total. The headline number looks healthy while the paying base shrinks underneath it."
+  }
+];
+
+const panel = document.getElementById("panel");
+const pills = document.querySelector(".pills");
+const nodes = [...document.querySelectorAll(".node")];
+
+function render(i){
+  const s = STAGES[i];
+  panel.innerHTML = `
+    <div class="tag">${s.tag}</div>
+    <h2>${s.n}</h2>
+    <div class="tier">Typical tier: <b>${s.tier}</b></div>
+    <div class="field"><h3>What happens</h3><p>${s.what}</p></div>
+    <div class="field"><h3>Moves to the next stage when</h3><p>${s.trigger}</p></div>
+    <div class="field"><h3>Owner</h3><p>${s.owner}</p></div>
+    <div class="field"><h3>System of record</h3><p>${s.system}</p></div>
+    <div class="field"><h3>The one number</h3><p>${s.metric}</p></div>
+    <div class="leak"><h3>Where it leaks</h3><p>${s.leak}</p></div>`;
+  nodes.forEach((g,j)=>g.classList.toggle("on", j===i));
+  [...pills.children].forEach((b,j)=>b.setAttribute("aria-selected", j===i));
+}
+
+STAGES.forEach((s,i)=>{
+  const b=document.createElement("button");
+  b.type="button"; b.setAttribute("role","tab"); b.textContent=`${i+1}. ${s.n}`;
+  b.addEventListener("click",()=>render(i));
+  pills.appendChild(b);
+});
+
+nodes.forEach(g=>{
+  const i=+g.dataset.i;
+  g.addEventListener("click",()=>render(i));
+  g.addEventListener("keydown",e=>{
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();render(i);}
+  });
+});
+
+document.getElementById("opsbody").innerHTML = STAGES.map((s,i)=>`
+  <tr>
+    <td class="stage">${i+1}. ${s.n}</td>
+    <td>${s.owner}</td>
+    <td>${s.system}</td>
+    <td class="metric">${s.metric}</td>
+  </tr>`).join("");
+
+render(0);
+</script>
+</body>
+</html>

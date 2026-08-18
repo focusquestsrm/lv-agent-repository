@@ -1,0 +1,596 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FocusQuest Lifecycle Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=Hanken+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --ink:#0A0A0A; --surface:#121110; --raise:#191715; --line:#282521;
+  --gold:#B8972A; --gold-lit:#E0BE55; --gold-dim:rgba(184,151,42,.16);
+  --silver:#9BA3AA; --silver-dim:rgba(155,163,170,.14);
+  --ivory:#F5F2EA; --muted:#8C867C; --faint:#5E594F;
+  --display:'Fraunces',Georgia,serif;
+  --ui:'Hanken Grotesk',system-ui,-apple-system,sans-serif;
+  --mono:'Space Mono','SFMono-Regular',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--ivory);font-family:var(--ui);font-weight:300;
+  line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 100px}
+
+/* ---------- header ---------- */
+header{padding:64px 0 30px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:20px}
+h1{font-family:var(--display);font-weight:300;font-size:clamp(38px,6vw,68px);line-height:1.02;
+  letter-spacing:-.02em}
+h1 em{font-style:italic;color:var(--gold)}
+.lede{max-width:62ch;margin-top:20px;color:var(--muted);font-size:16.5px}
+.lede b{color:var(--ivory);font-weight:500}
+
+/* ---------- controls ---------- */
+.bar{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-end;justify-content:space-between;
+  padding:26px 0;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--ink);z-index:40}
+.group{display:flex;flex-direction:column;gap:9px}
+.grouplabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{font-family:var(--ui);font-size:12px;font-weight:500;letter-spacing:.02em;padding:7px 13px;
+  border-radius:2px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;
+  transition:.16s;display:flex;align-items:center;gap:7px}
+.chip:hover{border-color:var(--faint);color:var(--ivory)}
+.chip[aria-pressed=true]{border-color:var(--gold);color:var(--ink);background:var(--gold)}
+.chip .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.d-plat{background:var(--gold)} .d-grad{background:linear-gradient(90deg,var(--silver) 50%,var(--gold) 50%)}
+.d-cit{background:var(--silver)} .d-gap{background:transparent;border:1px dashed var(--muted)}
+.chip[aria-pressed=true] .d-cit,.chip[aria-pressed=true] .d-plat{background:var(--ink)}
+
+/* ---------- spine timeline ---------- */
+.phase{margin-top:56px}
+.phasehead{display:flex;align-items:baseline;gap:16px;padding-bottom:14px;margin-bottom:6px;
+  border-bottom:1px solid var(--line)}
+.phasenum{font-family:var(--mono);font-size:11px;color:var(--gold);letter-spacing:.14em}
+.phasename{font-family:var(--display);font-size:23px;font-weight:500;letter-spacing:-.01em}
+.phasegoal{font-size:13.5px;color:var(--muted);margin-left:auto;text-align:right;max-width:40ch}
+
+.spine{position:relative;padding-left:52px}
+.spine::before{content:"";position:absolute;left:15px;top:14px;bottom:14px;width:2px;
+  background:linear-gradient(180deg,var(--gold),rgba(184,151,42,.35));
+  box-shadow:0 0 14px 1px rgba(184,151,42,.4)}
+
+.stage{position:relative;padding:22px 0;border-bottom:1px solid var(--line)}
+.stage:last-child{border-bottom:none}
+.stage::before{content:"";position:absolute;left:-44px;top:31px;width:12px;height:12px;border-radius:50%;
+  background:var(--ink);border:2px solid var(--gold);box-shadow:0 0 10px rgba(184,151,42,.7);transition:.2s}
+.stage[data-open="1"]::before{background:var(--gold);box-shadow:0 0 16px 2px rgba(184,151,42,.85)}
+
+.stagetop{display:flex;gap:18px;align-items:flex-start;cursor:pointer}
+.stagenum{font-family:var(--mono);font-size:12px;color:var(--gold);padding-top:5px;min-width:26px}
+.stagetitle{font-family:var(--display);font-size:21px;font-weight:500;letter-spacing:-.01em;line-height:1.25}
+.stagegoal{font-size:14px;color:var(--muted);margin-top:5px;max-width:66ch}
+.caret{margin-left:auto;color:var(--faint);font-size:19px;line-height:1;padding-top:6px;transition:.2s;flex:none}
+.stage[data-open="1"] .caret{transform:rotate(45deg);color:var(--gold)}
+
+.body{display:none;padding:22px 0 6px 44px}
+.stage[data-open="1"] .body{display:block}
+.cols{display:grid;grid-template-columns:1.25fr 1fr;gap:34px}
+@media(max-width:760px){.cols{grid-template-columns:1fr;gap:22px}.body{padding-left:0}}
+.sub{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:11px}
+.acts{list-style:none;display:flex;flex-direction:column;gap:9px}
+.acts li{font-size:14px;color:var(--ivory);padding-left:17px;position:relative;font-weight:300}
+.acts li::before{content:"";position:absolute;left:0;top:9px;width:6px;height:1px;background:var(--gold)}
+.meta{border-left:1px solid var(--line);padding-left:22px}
+@media(max-width:760px){.meta{border-left:none;padding-left:0;border-top:1px solid var(--line);padding-top:20px}}
+.metarow{margin-bottom:18px}
+.metaval{font-size:13.5px;color:var(--ivory)}
+.metaval.gate{color:var(--gold-lit);font-weight:500}
+.svc{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.svc span{font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;color:var(--muted);
+  border:1px solid var(--line);padding:3px 7px;border-radius:2px}
+
+/* ---------- app chips ---------- */
+.apps{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.app{font-size:12.5px;font-weight:500;padding:8px 13px;border-radius:2px;cursor:pointer;
+  border:1px solid;background:transparent;text-align:left;transition:.16s;display:flex;align-items:center;gap:8px;
+  font-family:var(--ui)}
+.app .mark{width:6px;height:6px;border-radius:50%;flex:none}
+.app.platform{border-color:rgba(184,151,42,.5);color:var(--gold-lit);background:var(--gold-dim)}
+.app.platform .mark{background:var(--gold)}
+.app.graduating{border-color:rgba(184,151,42,.45);color:#CDBB8E;
+  background:linear-gradient(100deg,var(--silver-dim),var(--gold-dim))}
+.app.graduating .mark{background:linear-gradient(90deg,var(--silver) 50%,var(--gold) 50%)}
+.app.citizen{border-color:rgba(155,163,170,.4);color:var(--silver);background:var(--silver-dim)}
+.app.citizen .mark{background:var(--silver)}
+.app.gap{border:1px dashed var(--faint);color:var(--muted);background:transparent}
+.app.gap .mark{display:none}
+.app:hover{transform:translateY(-1px);filter:brightness(1.25)}
+.app.dim{opacity:.16;pointer-events:none}
+.addbtn{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;padding:8px 12px;border-radius:2px;
+  border:1px dashed var(--line);background:transparent;color:var(--faint);cursor:pointer;transition:.16s}
+.addbtn:hover{border-color:var(--gold);color:var(--gold)}
+
+/* ---------- nested student journey ---------- */
+.nest{margin:26px 0 4px;border:1px solid var(--line);border-left:2px solid var(--gold);
+  background:var(--surface);padding:22px 24px}
+.nesthead{font-family:var(--display);font-size:17px;font-weight:500;margin-bottom:4px}
+.nestnote{font-size:13px;color:var(--muted);max-width:70ch;margin-bottom:18px}
+.rail{display:flex;flex-wrap:wrap;gap:0;align-items:stretch}
+.step{flex:1;min-width:118px;border-top:2px solid var(--gold);padding:13px 14px 4px 0}
+.step .n{font-family:var(--mono);font-size:9.5px;color:var(--gold);letter-spacing:.12em}
+.step .t{font-size:13.5px;font-weight:600;margin:5px 0 4px;color:var(--ivory)}
+.step .d{font-size:11.5px;color:var(--muted);line-height:1.45}
+
+/* ---------- matrix ---------- */
+.matrix{display:none;margin-top:46px}
+.matrix.on{display:block}
+.timeline.off{display:none}
+.grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);margin-top:24px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+.cell{padding:24px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);min-height:190px}
+.cell:nth-child(2n){border-right:none}
+.cell:nth-last-child(-n+2){border-bottom:none}
+@media(max-width:760px){.cell{border-right:none}.cell:nth-last-child(-n+2){border-bottom:1px solid var(--line)}}
+.cellhead{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:5px}
+.celldesc{font-size:12.5px;color:var(--muted);margin-bottom:15px;max-width:44ch}
+.axis{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+
+/* ---------- panel ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(3px);z-index:90;display:none}
+.scrim.on{display:block}
+.panel{position:fixed;top:0;right:0;bottom:0;width:min(440px,92vw);background:var(--surface);
+  border-left:1px solid var(--line);z-index:100;padding:38px 32px;overflow-y:auto;
+  transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1)}
+.panel.on{transform:translateX(0)}
+.panel h3{font-family:var(--display);font-size:27px;font-weight:500;line-height:1.15;margin:12px 0 6px}
+.close{position:absolute;top:20px;right:24px;background:none;border:none;color:var(--faint);font-size:24px;
+  cursor:pointer;line-height:1}
+.close:hover{color:var(--gold)}
+.tier{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.16em;text-transform:uppercase;padding:5px 10px;border-radius:2px;border:1px solid}
+.pblock{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
+.pblock .sub{margin-bottom:8px}
+.pblock p{font-size:14px;color:var(--ivory);font-weight:300}
+.stagelist{display:flex;flex-direction:column;gap:7px;margin-top:4px}
+.stagelist div{font-size:13px;color:var(--muted)}
+.stagelist b{color:var(--gold-lit);font-family:var(--mono);font-size:11px;font-weight:400;margin-right:8px}
+
+/* ---------- form ---------- */
+.form{margin-top:14px;padding:18px;border:1px solid var(--line);background:var(--raise);display:none}
+.form.on{display:block}
+.form label{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint);margin:12px 0 6px}
+.form label:first-child{margin-top:0}
+.form input,.form select,.form textarea{width:100%;background:var(--ink);border:1px solid var(--line);
+  color:var(--ivory);padding:9px 11px;font-family:var(--ui);font-size:13.5px;border-radius:2px;font-weight:300}
+.form input:focus,.form select:focus,.form textarea:focus{outline:none;border-color:var(--gold)}
+.form textarea{resize:vertical;min-height:58px}
+.frow{display:flex;gap:9px;margin-top:16px}
+.save{background:var(--gold);color:var(--ink);border:none;padding:9px 18px;font-weight:600;font-size:13px;
+  border-radius:2px;cursor:pointer;font-family:var(--ui)}
+.cancel{background:none;border:1px solid var(--line);color:var(--muted);padding:9px 16px;font-size:13px;
+  border-radius:2px;cursor:pointer;font-family:var(--ui)}
+.cancel:hover{color:var(--ivory)}
+.status{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:11px;min-height:13px}
+
+footer{margin-top:76px;padding-top:26px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--faint);
+  display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">FocusQuest LLC · Operating Architecture</div>
+  <h1>The Institutional <em>Lifecycle</em></h1>
+  <p class="lede">Eleven stages from first signal to renewal, with every FocusQuest product mapped to the stage it serves. The student journey is not a stage — it is a <b>lifecycle nested inside Phase III</b>, which is what a student acquisition and success partner is actually selling. Products are classified by how they were built and who governs them.</p>
+</header>
+
+<div class="bar">
+  <div class="group">
+    <div class="grouplabel">View</div>
+    <div class="chips">
+      <button class="chip" data-view="timeline" aria-pressed="true">Lifecycle</button>
+      <button class="chip" data-view="matrix" aria-pressed="false">Portfolio Matrix</button>
+    </div>
+  </div>
+  <div class="group">
+    <div class="grouplabel">Show Products</div>
+    <div class="chips" id="filters">
+      <button class="chip" data-tier="all" aria-pressed="true">All</button>
+      <button class="chip" data-tier="platform" aria-pressed="false"><i class="dot d-plat"></i>Enterprise Platform</button>
+      <button class="chip" data-tier="graduating" aria-pressed="false"><i class="dot d-grad"></i>Graduating</button>
+      <button class="chip" data-tier="citizen" aria-pressed="false"><i class="dot d-cit"></i>Agent &amp; Citizen Dev</button>
+      <button class="chip" data-tier="gap" aria-pressed="false"><i class="dot d-gap"></i>Gap</button>
+    </div>
+  </div>
+</div>
+
+<div class="timeline" id="timeline"></div>
+
+<section class="matrix" id="matrix">
+  <div class="axis">Vertical Axis: Who It Serves &nbsp;·&nbsp; Horizontal Axis: How It Is Built And Governed</div>
+  <div class="grid" id="grid"></div>
+</section>
+
+<footer>
+  <span>FocusQuest LLC · Confidential Operating Document</span>
+  <span>Black · Gold · White</span>
+</footer>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel" role="dialog" aria-label="Product detail">
+  <button class="close" id="close" aria-label="Close">&times;</button>
+  <div id="panelbody"></div>
+</aside>
+
+<script>
+/* ============ PRODUCT REGISTRY ============ */
+const APPS = {
+  strata:{name:"FocusQuest Strata™",tier:"platform",audience:"institution",
+    role:"AI enrollment intelligence platform. Modular per tenant — each institution activates only the modules it bought.",
+    detail:"Counselor-first alternative to Slate, Salesforce Education Cloud, Ellucian CRM Recruit, and Element451, built specifically for HBCU and MSI operating realities. Modules: Enrollment Intelligence, Marketing Analytics, Student Success AI, Workforce Pipeline, Counselor Tools, AI Advisor."},
+  match:{name:"FocusQuest Match™",tier:"platform",audience:"student",
+    role:"Matches students to counselors and coaches by personality, interests, and communication style.",
+    detail:"Uses TIPI (Big Five) — a 15-question counselor assessment and an 8-question student form — resolving to five counselor archetypes: Connector, Closer, Guide, Analyst, Motivator. Match rationale surfaces in the Strata pipeline. FERPA applies; student participation is optional."},
+  university:{name:"FocusQuest University",tier:"platform",audience:"student",
+    role:"Learning platform for course delivery, faculty enablement, and student coursework.",
+    detail:"Carries the LMS Delivery service line and the virtual HBCU experience. Also the delivery vehicle for faculty training when an institution converts in-class content to online. Structure: Courses → Modules → Lessons."},
+  publishing:{name:"FocusQuest Publishing",tier:"platform",audience:"institution",
+    role:"Curriculum development and course content production.",
+    detail:"Backs the Curriculum Development service line. Converts institutional in-class programs into online programs and certificate pathways. Also the imprint behind SilverQuest."},
+  mission:{name:"Mission Control",tier:"platform",audience:"student",
+    role:"Public intake, landing pages, and the top-of-funnel awareness pipeline.",
+    detail:"Where Start Your Quest and campaign traffic land. Captures inquiry-stage interest before a student enters the Strata pipeline. Corridor-specific pages already planned for the Talent Search applications."},
+  silver:{name:"SilverQuest",tier:"platform",audience:"student",
+    role:"AI and digital literacy curriculum for adults 55+ in underserved communities.",
+    detail:"Extends the institution's reach beyond traditional-age students into adult and community learners — a continuing education and community engagement asset for the partner institution. 50+ courses across eight thematic schools."},
+  d9:{name:"D9Network",tier:"platform",audience:"institution",
+    role:"Alumni, chapter, and mentor network — warm introductions, mentorship, and post-secondary contact maintenance.",
+    detail:"Opens institutional doors that cold outreach cannot, supplies volunteer mentors, and maintains contact with students after they leave a program. Also carries the Procurement Network and Corporate Sponsorship initiatives."},
+  comptroller:{name:"Comptroller",tier:"graduating",audience:"internal",
+    role:"AI financial intelligence and virtual CFO. Built internally, now productizing for clients.",
+    detail:"All arithmetic runs deterministically in a JavaScript rules engine; the model handles interpretation only, never math. Started as an internal instrument for Lead Ventures, which is exactly what makes it a graduating asset — it needs product governance, not just an owner."},
+  procagent:{name:"HBCU Procurement Intelligence Agent",tier:"citizen",audience:"internal",
+    role:"Monitors all 103 HBCUs and qualifying MSIs for active procurement opportunities.",
+    detail:"Agentic web search against institutional portals, SAM.gov, and state procurement systems. This is the true front of the lifecycle — it produces the target list before anyone picks up a phone. Daily scheduled scanning with email delivery is the next build."},
+  digest:{name:"HBCU & MSI Procurement Digest",tier:"citizen",audience:"institution",
+    role:"Weekly procurement intelligence newsletter for HBCU and MSI administrators.",
+    detail:"A citizen-built automation that doubles as the demand-generation engine: it earns attention from the exact administrators FocusQuest needs to reach. No direct competitor serves institutions this way — existing tools like BidSync and Periscope are vendor-facing."},
+  pulse:{name:"PulseFQ",tier:"citizen",audience:"internal",
+    role:"Real-time survey and workshop pulse instrument.",
+    detail:"Used for discovery needs assessments, faculty training feedback, and student experience checks. Currently backed by a commercial survey tool while the Supabase work is deferred."},
+  /* gaps */
+  gapcrm:{name:"Institutional Relationship System",tier:"gap",audience:"internal",
+    role:"No system currently owns institutional leads, champions, or the sales pipeline.",
+    detail:"Strata tracks students, not institutions. Stages 1 through 5 have no system of record — which means a champion's name, a discovery note, and a proposal version all live in someone's inbox. This is the largest structural gap in the lifecycle."},
+  gapvault:{name:"Agreement & Compliance Vault",tier:"gap",audience:"internal",
+    role:"No repository for executed agreements, data agreements, and certifications.",
+    detail:"Needs to hold signed partnership agreements, FERPA and data-sharing agreements, security reviews, MBE and M/WBE certification documents, W-9s, insurance certificates, and NAICS/UNSPSC registrations — retrievable on demand when an RFP asks for them."},
+  gapadopt:{name:"Adoption Telemetry",tier:"gap",audience:"internal",
+    role:"No visibility into whether trained faculty and staff actually use what was delivered.",
+    detail:"Belongs inside Strata as part of the Institution Admin Panel already on the roadmap: logins, calls logged, notes written, per user and per department, against a 30-day adoption baseline."},
+  gaphealth:{name:"Institutional Health Dashboard",tier:"gap",audience:"institution",
+    role:"No executive-level outcomes view for the president and cabinet.",
+    detail:"On the Strata roadmap: net tuition revenue, discount rate, enrollment against budget, retention, and program-level performance. This is the artifact that renews the contract — the proof object for the people who sign."}
+};
+
+/* ============ LIFECYCLE ============ */
+const PHASES = [
+ {n:"Phase I",name:"Acquire The Institution",goal:"From market signal to a scoped, agreed partnership."},
+ {n:"Phase II",name:"Commit And Build",goal:"From signature to a live program with people who can run it."},
+ {n:"Phase III",name:"Deliver The Student Journey",goal:"The work the institution actually bought — inquiry to career."},
+ {n:"Phase IV",name:"Prove And Grow",goal:"Evidence, renewal, expansion — and back to the top of the funnel."}
+];
+
+const STAGES = [
+{p:0,n:"01",title:"Market Intelligence & Target Identification",
+ goal:"Know which institutions are in market before anyone makes contact.",
+ acts:["Monitor all 103 HBCUs and qualifying MSIs for open procurement, RFPs, and RFQs",
+   "Track enrollment pressure signals: declining yield, melt, program closures, leadership change",
+   "Watch funding cycles — Title III, Talent Search and TRIO, state and federal grant calendars",
+   "Score institutional fit and build the ranked target list with a documented reason to call"],
+ exit:"A ranked target list where every institution has a named reason to call.",
+ owner:"Danielle · Sean",svc:["Targeted Market Research"],
+ apps:["procagent","digest","gapcrm"]},
+
+{p:0,n:"02",title:"Lead Generation & Institutional Outreach",
+ goal:"Turn a target institution into a conversation.",
+ acts:["Distribute the Procurement Digest to administrators — earn attention before asking for it",
+   "Activate D9Network and HBCU Consortium relationships for warm introductions",
+   "Sean leads presidential and cabinet-level outreach as the public-facing voice",
+   "Run segmented campaign sequences and track response by institution and role"],
+ exit:"A reply, a referral, or a scheduled meeting.",
+ owner:"Sean · Tina · Mariano",svc:["Lead Generation","Communications"],
+ apps:["digest","d9","mission","gapcrm"]},
+
+{p:0,n:"03",title:"Contact Established, Discovery & Program Audit",
+ goal:"A named champion inside the institution and a documented problem worth solving.",
+ acts:["Confirm the champion and map every stakeholder: Enrollment, Provost, IR, IT, Procurement",
+   "Diagnose the real pressure — yield, melt, retention, counselor capacity, or online capability",
+   "Audit which in-class programs are candidates for online conversion",
+   "Confirm the funding source and the procurement path: direct, RFP, or grant-funded"],
+ exit:"Named champion, documented need, confirmed budget source and decision path.",
+ owner:"Danielle · Dr. Booker",svc:["Strategic Support"],
+ apps:["pulse","strata","gapcrm"]},
+
+{p:0,n:"04",title:"Solution Design & Proposal",
+ goal:"A scoped proposal built from modules the institution actually needs.",
+ acts:["Select the Strata modules and service lines that match the diagnosed need",
+   "Demo a configured tenant so the institution sees its own use case, not a generic tour",
+   "Frame the return on investment against the institution's own baseline numbers",
+   "Position MBE and M/WBE certification, and map to a grant pathway where one exists"],
+ exit:"Proposal delivered and scope verbally agreed. No pricing in client-facing materials.",
+ owner:"Danielle · Sean",svc:["Strategic Support"],
+ apps:["strata","match","university","comptroller","gapcrm"]},
+
+{p:1,n:"05",title:"Partnership Agreement & Procurement",
+ goal:"Signature, purchase order, and a start date.",
+ acts:["Execute the partnership agreement and the data sharing and FERPA agreement",
+   "Clear the institution's security review, vendor registration, and insurance requirements",
+   "Supply certification documentation: MBE, M/WBE, W-9, NAICS 611710, UNSPSC codes",
+   "Respond to formal solicitation where the path requires an RFP or RFQ submission"],
+ exit:"Countersigned agreement, purchase order number, confirmed start date.",
+ owner:"Sean · Danielle",svc:["Strategic Support"],
+ apps:["comptroller","gapvault"]},
+
+{p:1,n:"06",title:"Onboarding: Program Build & Platform Delivery",
+ goal:"A working tenant and, where applicable, a program that exists online.",
+ acts:["Provision the tenant and set the enabled modules array to exactly what was purchased",
+   "Register the institution's own BLS API key — never reuse a key across institutions",
+   "Convert in-class curriculum to online delivery and stand up certificate pathways",
+   "Map Banner or Ellucian data, configure SSO and roles, verify tenant data isolation"],
+ exit:"Tenant live, data flowing, isolation verified, first program published.",
+ owner:"Danielle",svc:["LMS Delivery","Curriculum Development","HBCU Experience"],
+ apps:["strata","university","publishing","match"]},
+
+{p:1,n:"07",title:"Faculty & Staff Enablement",
+ goal:"The people who have to run this can run it without FocusQuest in the room.",
+ acts:["Train faculty on the transition from in-class content to virtual instruction",
+   "Deliver role-based training for counselors, supervisors, and administrators",
+   "Publish the module mapping document so every role knows what it owns",
+   "Hold office hours through the first term and set the 30-day adoption baseline"],
+ exit:"Faculty certified, and 80% of licensed staff active within the first 30 days.",
+ owner:"Dr. Booker · Danielle",svc:["Faculty Training"],
+ apps:["university","strata","pulse","gapadopt"]},
+
+{p:2,n:"08",title:"Student Acquisition & Enrollment",
+ goal:"Motivated learners find the institution and complete enrollment.",
+ acts:["Run digital marketing and communications against the institution's program portfolio",
+   "Capture inquiries through Mission Control and route them into the Strata pipeline",
+   "Match each prospective student to the right counselor before the first conversation",
+   "Move inquiry to application to deposit with tracked outreach and FAFSA support"],
+ exit:"Enrolled students against the institution's stated enrollment goal.",
+ owner:"FocusQuest Enrollment Team",svc:["Enrollment Services","Communications","Lead Generation"],
+ apps:["mission","strata","match","gaphealth"]},
+
+{p:2,n:"09",title:"Student Success & Engagement",
+ goal:"Each enrolled student is coached from enrollment through graduation.",
+ acts:["Pair every enrolled student with a Student Success Coach for the full collegiate lifecycle",
+   "Run early alerts, persistence flags, and re-entry support when a student goes cold",
+   "Deliver mentorship, scholarship guidance, and the virtual HBCU experience",
+   "Prevent summer melt and track sophomore return and FAFSA renewal"],
+ exit:"Retention and persistence at or above the institution's baseline.",
+ owner:"Student Success Coaches · Dr. Booker",svc:["Student Success","HBCU Experience","Mentorship"],
+ apps:["strata","match","university","d9"]},
+
+{p:2,n:"10",title:"Workforce Readiness & Career Outcomes",
+ goal:"Students leave with credentials and a path into employment.",
+ acts:["Deliver industry-recognized credentials and certificate pathways through partners",
+   "Connect students to corporate partners, internships, and apprenticeship pathways",
+   "Operate the Career Center and career pathway advising against real labor market data",
+   "Extend into adult and community learners through continuing education programming"],
+ exit:"Documented credentials earned and placements or continued enrollment.",
+ owner:"Danielle · Corporate Partners",svc:["Corporate Partners","Career Paths"],
+ apps:["strata","university","silver","d9","publishing"]},
+
+{p:3,n:"11",title:"Outcomes Reporting, Renewal & Expansion",
+ goal:"Prove the value, renew the agreement, and feed the next target list.",
+ acts:["Report yield, retention, completion, and credential outcomes against the original baseline",
+   "Deliver the executive outcomes review to the president and cabinet, not just the department",
+   "Open renewal 90 days out and scope module or program expansion",
+   "Convert the institution into a reference, a case study, and a grant co-applicant"],
+ exit:"Renewal signed or expansion scoped — and a reference that returns to Stage 01.",
+ owner:"Sean · Danielle",svc:["Strategic Support"],
+ apps:["gaphealth","strata","comptroller","digest","d9"]}
+];
+
+const JOURNEY=[
+ {n:"01",t:"Inquiry",d:"Interest captured through Mission Control and campaign traffic."},
+ {n:"02",t:"Application",d:"Guided completion with counselor support and deadline tracking."},
+ {n:"03",t:"Enrollment",d:"Deposit, financial aid, and FAFSA completion through to registration."},
+ {n:"04",t:"Coaching",d:"Paired with a Success Coach for the full collegiate lifecycle."},
+ {n:"05",t:"Persistence",d:"Early alerts, re-entry support, and melt prevention term over term."},
+ {n:"06",t:"Graduation",d:"Completion, credential award, and program conferral."},
+ {n:"07",t:"Career",d:"Credentials, corporate partners, internships, and placement."}
+];
+
+const TIERLABEL={platform:"Enterprise Platform",graduating:"Graduating To Platform",
+  citizen:"Agent & Citizen Development",gap:"Unfilled Gap"};
+const AUDLABEL={internal:"Internal — Employee Facing",institution:"External — Institution Facing",
+  student:"External — Student Facing"};
+
+/* ============ STATE ============ */
+let custom={}, filter="all";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const allApps=()=>Object.assign({},APPS,custom);
+
+/* ============ RENDER ============ */
+function appChip(id){
+  const a=allApps()[id]; if(!a) return "";
+  const dim=(filter!=="all"&&a.tier!==filter)?" dim":"";
+  return `<button class="app ${a.tier}${dim}" data-app="${id}"><i class="mark"></i>${esc(a.name)}</button>`;
+}
+
+function renderTimeline(){
+  let h="";
+  PHASES.forEach((ph,pi)=>{
+    h+=`<section class="phase"><div class="phasehead">
+      <span class="phasenum">${ph.n}</span>
+      <span class="phasename">${ph.name}</span>
+      <span class="phasegoal">${ph.goal}</span></div>`;
+    if(pi===2){
+      h+=`<div class="nest"><div class="nesthead">The Student Journey Runs Inside This Phase</div>
+        <p class="nestnote">Stages 08 through 10 are not three tasks — they are one continuous journey per student, running for years, repeating for every cohort. This is the nested lifecycle a student success partner is actually contracted to operate.</p>
+        <div class="rail">${JOURNEY.map(s=>`<div class="step"><div class="n">${s.n}</div><div class="t">${s.t}</div><div class="d">${s.d}</div></div>`).join("")}</div></div>`;
+    }
+    h+=`<div class="spine">`;
+    STAGES.filter(s=>s.p===pi).forEach(s=>{
+      const extra=Object.keys(custom).filter(k=>custom[k].stage===s.n);
+      h+=`<article class="stage" data-open="0" data-stage="${s.n}">
+        <div class="stagetop" role="button" tabindex="0">
+          <span class="stagenum">${s.n}</span>
+          <div><div class="stagetitle">${s.title}</div><div class="stagegoal">${s.goal}</div></div>
+          <span class="caret">+</span>
+        </div>
+        <div class="body"><div class="cols">
+          <div><div class="sub">What Happens Here</div>
+            <ul class="acts">${s.acts.map(a=>`<li>${a}</li>`).join("")}</ul></div>
+          <div class="meta">
+            <div class="metarow"><div class="sub">Exit Criterion</div>
+              <div class="metaval gate">${s.exit}</div></div>
+            <div class="metarow"><div class="sub">Owner</div>
+              <div class="metaval">${s.owner}</div></div>
+            <div class="metarow"><div class="sub">Service Line</div>
+              <div class="svc">${s.svc.map(v=>`<span>${v}</span>`).join("")}</div></div>
+          </div></div>
+          <div style="margin-top:24px"><div class="sub">Products Supporting This Stage</div>
+            <div class="apps">${s.apps.concat(extra).map(appChip).join("")}
+              <button class="addbtn" data-add="${s.n}">+ Add Product</button></div>
+            <div class="form" id="form-${s.n}">
+              <label>Product Name</label><input type="text" data-f="name" placeholder="e.g. Partner Portal">
+              <label>Classification</label>
+              <select data-f="tier">
+                <option value="platform">Enterprise Platform — organization-wide, governed</option>
+                <option value="graduating">Graduating — internal tool becoming a product</option>
+                <option value="citizen">Agent &amp; Citizen Development — employee enablement</option>
+                <option value="gap">Gap — needed, does not exist yet</option>
+              </select>
+              <label>Who It Serves</label>
+              <select data-f="audience">
+                <option value="internal">Internal — employee facing</option>
+                <option value="institution">External — institution facing</option>
+                <option value="student">External — student facing</option>
+              </select>
+              <label>What It Does Here</label><textarea data-f="role" placeholder="One sentence."></textarea>
+              <div class="frow"><button class="save" data-save="${s.n}">Add Product</button>
+                <button class="cancel" data-cancel="${s.n}">Cancel</button></div>
+              <div class="status" id="st-${s.n}"></div>
+            </div>
+          </div>
+        </div></article>`;
+    });
+    h+=`</div></section>`;
+  });
+  $("timeline").innerHTML=h;
+}
+
+function renderMatrix(){
+  const A=allApps();
+  const quads=[
+    {aud:["internal"],tier:["citizen","graduating"],h:"Employee Enablement",
+     d:"Built fast, owned by an individual, solves an internal bottleneck. Speed is the point — and the risk."},
+    {aud:["internal"],tier:["platform","gap"],h:"Internal Infrastructure",
+     d:"Organization-wide systems of record. Governed, documented, not tied to one person's laptop."},
+    {aud:["institution","student"],tier:["citizen","graduating"],h:"Client-Facing, Ungoverned",
+     d:"The watch list. External users depend on these, but they were not built to platform standards yet."},
+    {aud:["institution","student"],tier:["platform","gap"],h:"Revenue Platforms",
+     d:"What the institution is actually buying. Multi-tenant, supported, contractually committed."}
+  ];
+  $("grid").innerHTML=quads.map(q=>{
+    const ids=Object.keys(A).filter(k=>q.aud.includes(A[k].audience)&&q.tier.includes(A[k].tier));
+    return `<div class="cell"><div class="cellhead">${q.h}</div>
+      <div class="celldesc">${q.d}</div>
+      <div class="apps">${ids.map(appChip).join("")||'<span style="color:var(--faint);font-size:12px">Nothing here yet.</span>'}</div></div>`;
+  }).join("");
+}
+
+function render(){renderTimeline();renderMatrix();}
+
+/* ============ PANEL ============ */
+function openPanel(id){
+  const a=allApps()[id]; if(!a) return;
+  const inStages=STAGES.filter(s=>s.apps.includes(id)||(custom[id]&&custom[id].stage===s.n));
+  const c=a.tier==="citizen"?"var(--silver)":a.tier==="gap"?"var(--muted)":"var(--gold)";
+  $("panelbody").innerHTML=`
+    <span class="tier" style="color:${c};border-color:${c}">${TIERLABEL[a.tier]}</span>
+    <h3>${esc(a.name)}</h3>
+    <div style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase">${AUDLABEL[a.audience]||""}</div>
+    <div class="pblock"><div class="sub">Role</div><p>${esc(a.role)}</p></div>
+    ${a.detail?`<div class="pblock"><div class="sub">Detail</div><p>${esc(a.detail)}</p></div>`:""}
+    <div class="pblock"><div class="sub">Appears In</div><div class="stagelist">
+      ${inStages.map(s=>`<div><b>${s.n}</b>${s.title}</div>`).join("")||"<div>Not yet mapped to a stage.</div>"}
+    </div></div>`;
+  $("panel").classList.add("on");$("scrim").classList.add("on");
+}
+function closePanel(){$("panel").classList.remove("on");$("scrim").classList.remove("on");}
+
+/* ============ PERSISTENCE ============ */
+async function load(){
+  try{const r=await window.storage.get("fq-lifecycle-apps");
+    if(r&&r.value)custom=JSON.parse(r.value);}catch(e){}
+  render();
+}
+async function persist(stage){
+  const s=$("st-"+stage);
+  try{await window.storage.set("fq-lifecycle-apps",JSON.stringify(custom));
+    if(s)s.textContent="Saved.";}
+  catch(e){if(s)s.textContent="Added for this session — could not save.";}
+}
+
+/* ============ EVENTS ============ */
+document.addEventListener("click",e=>{
+  const view=e.target.closest("[data-view]");
+  if(view){document.querySelectorAll("[data-view]").forEach(b=>b.setAttribute("aria-pressed",b===view));
+    $("timeline").classList.toggle("off",view.dataset.view!=="timeline");
+    $("matrix").classList.toggle("on",view.dataset.view==="matrix");return;}
+
+  const f=e.target.closest("[data-tier]");
+  if(f){filter=f.dataset.tier;
+    document.querySelectorAll("[data-tier]").forEach(b=>b.setAttribute("aria-pressed",b===f));
+    const open=[...document.querySelectorAll('.stage[data-open="1"]')].map(s=>s.dataset.stage);
+    render();open.forEach(n=>{const el=document.querySelector(`.stage[data-stage="${n}"]`);
+      if(el)el.dataset.open="1";});return;}
+
+  const app=e.target.closest("[data-app]");
+  if(app){openPanel(app.dataset.app);return;}
+
+  const add=e.target.closest("[data-add]");
+  if(add){$("form-"+add.dataset.add).classList.add("on");
+    $("form-"+add.dataset.add).querySelector("input").focus();return;}
+
+  const cancel=e.target.closest("[data-cancel]");
+  if(cancel){$("form-"+cancel.dataset.cancel).classList.remove("on");return;}
+
+  const save=e.target.closest("[data-save]");
+  if(save){
+    const st=save.dataset.save,form=$("form-"+st);
+    const get=k=>form.querySelector(`[data-f="${k}"]`).value.trim();
+    const name=get("name");
+    if(!name){$("st-"+st).textContent="Enter a product name.";return;}
+    const id="c"+Date.now();
+    custom[id]={name,tier:get("tier"),audience:get("audience"),
+      role:get("role")||"Added to the lifecycle map.",detail:"",stage:st};
+    persist(st);
+    const open=[...document.querySelectorAll('.stage[data-open="1"]')].map(s=>s.dataset.stage);
+    render();open.concat(st).forEach(n=>{const el=document.querySelector(`.stage[data-stage="${n}"]`);
+      if(el)el.dataset.open="1";});return;}
+
+  const top=e.target.closest(".stagetop");
+  if(top){const s=top.closest(".stage");s.dataset.open=s.dataset.open==="1"?"0":"1";return;}
+
+  if(e.target.closest("#close")||e.target.id==="scrim")closePanel();
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape")closePanel();
+  if((e.key==="Enter"||e.key===" ")&&e.target.classList.contains("stagetop")){
+    e.preventDefault();const s=e.target.closest(".stage");s.dataset.open=s.dataset.open==="1"?"0":"1";}
+});
+
+load();
+</script>
