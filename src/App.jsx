@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase, configured } from "./supabase";
 import { ASSESSMENT_VERSION, DEFAULT_REVIEW_THRESHOLD, GOVERNANCE_CATEGORIES, LIKERT_OPTIONS, OVERRIDE_QUESTIONS, TRIGGER_QUESTIONS, evaluateGovernance, initialQuestionnaire, riskBand, riskLabel, visibleStatements } from "./governance";
 import { findDuplicates } from "./duplicates";
-import { DuplicateQueue, Lifecycles, ProductSuite, ResourceCompare, StartHere } from "./HubFeatures";
+import { DuplicateQueue, Lifecycles, Notice, ProductSuite, ResourceCompare, StartHere } from "./HubFeatures";
 import { APP_LOGO_ALT, APP_LOGO_URL } from "./brand";
 export default function App() {
   const [session, setSession] = useState(null),
