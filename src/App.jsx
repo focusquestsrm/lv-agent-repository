@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase, configured } from "./supabase";
 import { ASSESSMENT_VERSION, DEFAULT_REVIEW_THRESHOLD, GOVERNANCE_CATEGORIES, LIKERT_OPTIONS, OVERRIDE_QUESTIONS, TRIGGER_QUESTIONS, evaluateGovernance, initialQuestionnaire, riskBand, riskLabel, visibleStatements } from "./governance";
 import { findDuplicates } from "./duplicates";
 import { DuplicateQueue, Lifecycles, Notice, ProductSuite, ResourceCompare, StartHere } from "./HubFeatures";
 import BrandLogo from "./components/branding/BrandLogo";
+import RouteErrorBoundary from "./RouteErrorBoundary";
+import { normalizeRegistrationDraft, platformDetailsPayload, readRegistrationDraft, registrationErrorSummary, saveErrorMessage, validateRegistration, validateRegistrationStep, writeRegistrationDraft } from "./resourceRegistration";
+import { isArchivedResource, isMyResource, isPublishedResource, resourceLocations, safeDataError } from "./resourceVisibility";
 import "./startHere.css";
 export default function App() {
   const [session, setSession] = useState(null),
@@ -276,6 +279,8 @@ function Registry({ session, profile }) {
     [awarenessNotifications, setAwarenessNotifications] = useState([]),
     [registrationDraft, setRegistrationDraft] = useState(null),
     [assessmentResult, setAssessmentResult] = useState(null),
+    [focusResourceId, setFocusResourceId] = useState(""),
+    [loadErrors, setLoadErrors] = useState({ resources: "", companies: "", lifecycles: "" }),
     [busy, setBusy] = useState(true),
     [modal, setModal] = useState(false),
     [editingAgent, setEditingAgent] = useState(null),
@@ -295,6 +300,7 @@ function Registry({ session, profile }) {
   const adminViews = ["users", "companies", "taxonomy", "access", "lifecycles-admin", "duplicates", "settings"];
   async function load() {
     setBusy(true);
+    const settle = (request) => Promise.resolve(request).catch((error) => ({ data: null, error }));
     const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, attention, settings, lc, lp, ls, lconn, lv, lm, dup, productLinks, departmentAccess, startAssessments, drafts, notifications] = await Promise.all([
       supabase
         .from("agents")
@@ -335,9 +341,16 @@ function Registry({ session, profile }) {
       supabase.from("start_here_assessments").select("*").order("updated_at", { ascending: false }),
       supabase.from("resource_registration_drafts").select("*").order("last_saved_at", { ascending: false }),
       supabase.from("admin_awareness_notifications").select("*").order("created_at", { ascending: false }),
-    ]);
+    ].map(settle));
+    const resourceError = a.error;
+    const lifecycleError = [lc, lp, ls, lconn, lv, lm].find((result) => result.error)?.error;
+    setLoadErrors({
+      resources: safeDataError(resourceError, "Resources could not be refreshed."),
+      companies: safeDataError(c.error, "Companies could not be refreshed."),
+      lifecycles: safeDataError(lifecycleError, "Operational lifecycle data could not be loaded."),
+    });
     const details = pd.data || [];
-    setAgents(
+    if (!resourceError) setAgents(
       (a.data || []).map((agent) => ({
         ...agent,
         platform_details:
@@ -346,7 +359,7 @@ function Registry({ session, profile }) {
     );
     setVersions(v.data || []);
     setUsers(u.data || []);
-    setCompanies(c.data || []);
+    if (!c.error) setCompanies(c.data || []);
     setDepartments(d.data || []);
     setCategories(cat.data || []);
     setUserAccess(ua.data || []);
@@ -358,12 +371,12 @@ function Registry({ session, profile }) {
     setRecommendations(gr.data || []);
     setSavedAttentionItems(attention.data || []);
     setAppSettings(Object.fromEntries((settings.data || []).map((item) => [item.setting_key, item.setting_value])));
-    setLifecycles(lc.data || []);
-    setLifecyclePhases(lp.data || []);
-    setLifecycleStages(ls.data || []);
-    setLifecycleConnections(lconn.data || []);
-    setLifecycleViewers(lv.data || []);
-    setLifecycleMappings(lm.data || []);
+    if (!lc.error) setLifecycles(lc.data || []);
+    if (!lp.error) setLifecyclePhases(lp.data || []);
+    if (!ls.error) setLifecycleStages(ls.data || []);
+    if (!lconn.error) setLifecycleConnections(lconn.data || []);
+    if (!lv.error) setLifecycleViewers(lv.data || []);
+    if (!lm.error) setLifecycleMappings(lm.data || []);
     setDuplicateMatches(dup.data || []);
     setProductRelationships(productLinks.data || []);
     setResourceDepartmentAccess(departmentAccess.data || []);
@@ -371,6 +384,7 @@ function Registry({ session, profile }) {
     setRegistrationDrafts(drafts.data || []);
     setAwarenessNotifications(notifications.data || []);
     setBusy(false);
+    return { resourceError, lifecycleError };
   }
   useEffect(() => {
     load();
@@ -634,10 +648,15 @@ function Registry({ session, profile }) {
         {view === "my-agents" && (
           <MyAgents
             rows={agents}
+            userId={session.user.id}
             companies={companies}
             departments={departments}
             categories={categories}
             busy={busy}
+            loadError={loadErrors.resources}
+            focusResourceId={focusResourceId}
+            clearFocus={() => setFocusResourceId("")}
+            retry={load}
           />
         )}{" "}
         {view === "agents" && (
@@ -648,6 +667,8 @@ function Registry({ session, profile }) {
             busy={busy}
             canEdit={canEdit}
             admin={admin}
+            loadError={loadErrors.resources}
+            retry={load}
             open={() => {
               setEditingAgent(null);
               setModal(true);
@@ -660,7 +681,7 @@ function Registry({ session, profile }) {
           />
         )}{" "}
         {view === "products" && <ProductSuite resources={agents} relationships={productRelationships} mappings={lifecycleMappings} companies={companies} lifecycles={lifecycles} admin={admin} open={canEdit ? () => { sessionStorage.setItem("hub-create-type", "product"); setEditingAgent(null); setModal(true); } : null} edit={canEdit ? (agent) => { setEditingAgent(agent); setModal(true); } : null} reload={load} notify={setToast} />}{" "}
-        {view === "lifecycles" && <Lifecycles mode="viewer" isAdmin={admin} lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} onCreate={() => setView("lifecycles-admin")} reload={load} notify={setToast} />}{" "}
+        {view === "lifecycles" && <RouteErrorBoundary routeKey={view} title="Company Lifecycles could not be displayed" onRetry={load} onBack={() => setView("dashboard")}><Lifecycles mode="viewer" isAdmin={admin} lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} loadError={loadErrors.lifecycles} onBack={() => setView("dashboard")} onCreate={() => setView("lifecycles-admin")} reload={load} notify={setToast} /></RouteErrorBoundary>}{" "}
         {view === "compare" && <ResourceCompare resources={agents.filter((item) => item.status !== "retired")} />}{" "}
         {view === "approvals" && (
           <Approvals
@@ -676,6 +697,8 @@ function Registry({ session, profile }) {
             rows={companies}
             agents={agents}
             admin={admin}
+            loadError={loadErrors.companies}
+            retry={load}
             open={() => { setEditingCompany(null); setCompanyModal(true); }}
             edit={(company) => { setEditingCompany(company); setCompanyModal(true); }}
           />
@@ -709,7 +732,7 @@ function Registry({ session, profile }) {
             edit={setAccessModal}
           />
         )}
-        {admin && view === "lifecycles-admin" && <Lifecycles mode="admin" lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} user={session.user} token={session.access_token} reload={load} notify={setToast} />}
+        {admin && view === "lifecycles-admin" && <RouteErrorBoundary routeKey={view} title="Operational Lifecycles could not be displayed" onRetry={load} onBack={() => setView("dashboard")}><Lifecycles mode="admin" lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} user={session.user} token={session.access_token} loadError={loadErrors.lifecycles} onBack={() => setView("dashboard")} reload={load} notify={setToast} /></RouteErrorBoundary>}
         {admin && view === "duplicates" && <DuplicateQueue matches={duplicateMatches} resources={agents} notify={setToast} reload={load} />}
         {admin && view === "settings" && <AISettings user={session.user} />}
       </section>
@@ -768,17 +791,18 @@ function Registry({ session, profile }) {
               setEditingAgent(null);
               setRegistrationDraft(null);
             }}
-            saved={(message, result) => {
+            saved={async (message, result) => {
               setModal(false);
               setToast(message || (editingAgent ? "Resource updated." : "Resource created."));
               if (result) setAssessmentResult(result);
+              if (result?.savedResource?.id) setFocusResourceId(result.savedResource.id);
               setEditingAgent(null);
               setRegistrationDraft(null);
-              load();
+              await load();
             }}
         />
       )}
-      {assessmentResult && <AssessmentResult result={assessmentResult} close={() => setAssessmentResult(null)} />}
+      {assessmentResult && <AssessmentResult result={assessmentResult} close={() => setAssessmentResult(null)} viewResource={() => { setAssessmentResult(null); setView("my-agents"); }} />}
       {companyModal && (
         <CompanyForm
           user={session.user}
@@ -806,11 +830,9 @@ function Registry({ session, profile }) {
   );
 }
 function Dashboard({ agents, companies, busy, canEdit, open, profile, lifecycleStages = [], lifecycleMappings = [], duplicateMatches = [], attentionItems = [], notifications = [] }) {
-  const approved = agents.filter(
-    (resource) => resource.governance_status === "cleared" && resource.status !== "retired",
-  );
+  const approved = agents.filter(isPublishedResource);
   const owned = [...new Set(approved.map((resource) => resource.owner_name).filter(Boolean))];
-  const active = agents.filter((resource) => resource.status !== "retired");
+  const active = agents.filter((resource) => !isArchivedResource(resource));
   const recent = active.filter(
     (resource) => new Date(resource.created_at).getTime() >= Date.now() - 30 * 86400000,
   );
@@ -820,7 +842,7 @@ function Dashboard({ agents, companies, busy, canEdit, open, profile, lifecycleS
   const missingOwners = active.filter((resource) => !resource.accountable_owner_id && !resource.owner_name);
   const myAttention = [...attentionItems.filter((item) => !item.resolved_at && (!item.owner_id || item.owner_id === profile?.id)), ...notifications.filter((item) => item.status === "unread" && (profile?.role === "admin" || item.user_id === profile?.id))];
   return (
-    <>
+    <div className="dashboard-container">
       <section className="dashboard-hero">
         <div>
           <small>LEAD VENTURES AI ENABLEMENT</small>
@@ -838,10 +860,10 @@ function Dashboard({ agents, companies, busy, canEdit, open, profile, lifecycleS
       <Stats
         values={[
           [approved.length, "Approved resources available"],
-          [approved.filter((resource) => resource.entry_type === "agent").length, "Total Agents"],
-          [approved.filter((resource) => resource.entry_type === "skillset").length, "Total Skillsets"],
-          [approved.filter((resource) => resource.entry_type === "platform").length, "Total Platforms"],
-          [approved.filter((resource) => resource.entry_type === "product").length, "Total Products"],
+          [active.filter((resource) => resource.entry_type === "agent").length, "Total Agents"],
+          [active.filter((resource) => resource.entry_type === "skillset").length, "Total Skillsets"],
+          [active.filter((resource) => resource.entry_type === "platform").length, "Total Platforms"],
+          [active.filter((resource) => resource.entry_type === "product").length, "Total Products"],
           [recent.length, "Recently added resources"],
         ]}
       />
@@ -942,7 +964,7 @@ function Dashboard({ agents, companies, busy, canEdit, open, profile, lifecycleS
           </section>
         </div>
       )}
-    </>
+    </div>
   );
 }
 const ACCESS_SCOPE_LABELS = {
@@ -955,8 +977,9 @@ const ACCESS_SCOPE_LABELS = {
   selected_departments: "Selected Departments",
   selected_individuals: "Selected Individuals",
 };
-function MyAgents({ rows, companies, departments, categories, busy }) {
+function MyAgents({ rows, userId, companies, departments, categories, busy, loadError, retry, focusResourceId, clearFocus }) {
   const [search, setSearch] = useState(""),
+    [details, setDetails] = useState(null),
     [filters, setFilters] = useState({
       company: "all",
       department: "all",
@@ -965,15 +988,16 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
       entryType: "all",
       accessScope: "all",
     });
-  const platforms = [...new Set(rows.map((row) => row.platform_details?.vendor || row.platform).filter(Boolean))].sort();
+  const mine = rows.filter((row) => isMyResource(row, userId));
+  const platforms = [...new Set(mine.map((row) => row.platform_details?.vendor || row.platform).filter(Boolean))].sort();
   const query = search.trim().toLowerCase();
-  const visible = rows.filter((row) => {
+  const visible = mine.filter((row) => {
     const searchable = [row.name, row.description, row.owner_name, row.department, row.category]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
     return (
-      row.status !== "retired" &&
+      !isArchivedResource(row) &&
       (!query || searchable.includes(query)) &&
       (filters.company === "all" || row.company_id === filters.company) &&
       (filters.department === "all" || row.department === filters.department) &&
@@ -986,12 +1010,20 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
   function filter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
+  useEffect(() => {
+    if (!focusResourceId) return;
+    const resource = rows.find((row) => row.id === focusResourceId);
+    if (resource) {
+      setDetails(resource);
+      clearFocus?.();
+    }
+  }, [focusResourceId, rows, clearFocus]);
   return (
     <>
       <PageHead
         tag="PERSONALIZED ACCESS"
         title="My Resources"
-        desc="Agents, reusable skillsets, and approved platforms available through team, company, ownership, role, or individual access."
+        desc="Resources you created or own, including drafts, pending reviews, approved records, and items needing changes."
       />
       <div className="resource-filters">
         <label className="resource-search">
@@ -1007,10 +1039,12 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
         <ResourceFilter label="Department" value={filters.department} onChange={(value) => filter("department", value)} options={departments.filter((row) => row.status === "active").map((row) => [row.name, row.name])} />
         <ResourceFilter label="Category" value={filters.category} onChange={(value) => filter("category", value)} options={categories.filter((row) => row.status === "active").map((row) => [row.name, row.name])} />
         <ResourceFilter label="Platform" value={filters.platform} onChange={(value) => filter("platform", value)} options={platforms.map((value) => [value, value])} />
-        <ResourceFilter label="Resource type" value={filters.entryType} onChange={(value) => filter("entryType", value)} options={[["agent", "Agent"], ["skillset", "Skillset"], ["platform", "Platform"]]} />
+        <ResourceFilter label="Resource type" value={filters.entryType} onChange={(value) => filter("entryType", value)} options={[["agent", "Agent"], ["skillset", "Skillset"], ["platform", "Platform"], ["product", "Product"]]} />
         <ResourceFilter label="Access scope" value={filters.accessScope} onChange={(value) => filter("accessScope", value)} options={Object.entries(ACCESS_SCOPE_LABELS)} />
       </div>
-      {busy ? (
+      {loadError ? (
+        <div className="page-load-error" role="alert"><h2>My Resources could not be refreshed</h2><p>{loadError}</p><button className="primary" onClick={retry}>Retry</button></div>
+      ) : busy ? (
         <Loading />
       ) : visible.length === 0 ? (
         <Empty title="No available resources found" text="No agents, skillsets, or platforms match your access and filters." />
@@ -1019,7 +1053,7 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
           <table>
             <thead>
               <tr>
-                <th>Resource</th><th>Type</th><th>Company</th><th>Category / Department</th><th>Owner</th><th>Platform / Vendor</th><th>Access instructions</th><th>Access</th><th>Governance</th><th>Expiration / Renewal</th><th>Open</th>
+                <th>Resource</th><th>Type</th><th>Company</th><th>Category / Department</th><th>Owner</th><th>Platform / Vendor</th><th>Access instructions</th><th>Access</th><th>Status</th><th>Expiration / Renewal</th><th>Open</th>
               </tr>
             </thead>
             <tbody>
@@ -1033,7 +1067,7 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
                   <td>{row.platform_details?.vendor || row.platform || "—"}</td>
                   <td>{row.entry_type === "platform" ? row.platform_details?.access_request_instructions || "Contact the designated administrator." : "—"}<small>{row.entry_type === "platform" ? row.platform_details?.support_contact || "" : ""}</small></td>
                   <td>{ACCESS_SCOPE_LABELS[row.access_scope] || "Admins Only"}<small>{row.access_permission || "view"}</small></td>
-                  <td><Pill text={row.governance_flagged ? "review" : "approved"} /></td>
+                  <td><Pill text={row.status} /><small>{row.governance_status || "assessment pending"}</small></td>
                   <td>{row.access_expires_at ? `Access: ${new Date(row.access_expires_at).toLocaleDateString()}` : "No access expiration"}<small>{row.platform_details?.renewal_at ? `Renewal: ${new Date(row.platform_details.renewal_at).toLocaleDateString()}` : ""}</small></td>
                   <td>{row.url ? <a className="open-resource" href={row.url} target="_blank" rel="noreferrer">Open {row.entry_type === "skillset" ? "Skillset" : row.entry_type === "platform" ? "Platform" : "Agent"} ↗</a> : "—"}</td>
                 </tr>
@@ -1043,6 +1077,7 @@ function MyAgents({ rows, companies, departments, categories, busy }) {
         </div>
       )}
       <p className="external-access-banner">Availability in The Hub does not automatically create a license or user account in an external platform. Follow the listed access instructions or contact the designated administrator.</p>
+      {details && <ResourceDetails agent={details} close={() => setDetails(null)} />}
     </>
   );
 }
@@ -1067,7 +1102,7 @@ const DIRECTORY_COLUMNS = [
   ["url", "URL"], ["actions", "Actions"],
 ];
 const DEFAULT_DIRECTORY_COLUMNS = ["resource", "type", "company", "owner", "status", "risk", "actions"];
-function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, userId }) {
+function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, userId, loadError, retry }) {
   const preferenceKey = `lv-directory-columns:${userId}`;
   const [company, setCompany] = useState("all"), [status, setStatus] = useState("active"), [columnsOpen, setColumnsOpen] = useState(false), [details, setDetails] = useState(null);
   const [columns, setColumns] = useState(() => { try { const saved = JSON.parse(localStorage.getItem(preferenceKey)); return Array.isArray(saved) ? ["resource", ...saved.filter((key) => key !== "resource" && DIRECTORY_COLUMNS.some(([id]) => id === key))] : DEFAULT_DIRECTORY_COLUMNS; } catch { return DEFAULT_DIRECTORY_COLUMNS; } });
@@ -1081,7 +1116,7 @@ function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, use
     });
     return () => { active = false; };
   }, [preferenceKey, userId]);
-  const visible = rows.filter((agent) => (company === "all" || agent.company_id === company) && (status === "all" || (status === "archived" ? agent.status === "retired" : agent.status !== "retired")));
+  const visible = rows.filter((agent) => isPublishedResource(agent) && (company === "all" || agent.company_id === company));
   const shown = (key) => columns.includes(key);
   const risk = (agent) => agent.governance_score == null ? "Pending" : riskLabel(riskBand(agent.governance_score));
   function applyColumns() { const next = ["resource", ...draftColumns.filter((key) => key !== "resource")]; setColumns(next); localStorage.setItem(preferenceKey, JSON.stringify(next)); setColumnsOpen(false); supabase.from("user_preferences").upsert({ user_id: userId, preference_key: "directory_columns", preference_value: next, updated_at: new Date().toISOString() }).then(({ error }) => { if (error) console.info("Directory preference stored locally until the profile preference migration is available."); }); }
@@ -1101,7 +1136,7 @@ function Agents({ rows, companies, busy, canEdit, admin, open, edit, manage, use
     <PageHead tag="TEAM INTELLIGENCE" title="Resource Directory" desc="The Hub source of truth for authorized Agents, Skillsets, Platforms, and Products." action={canEdit && <button className="primary" onClick={open}>＋ Add resource</button>}/>
     <div className="filterbar directory-filterbar"><label>Agents by Company<select value={company} onChange={(e) => setCompany(e.target.value)}><option value="all">All companies</option>{companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Archive status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="active">Active entries</option><option value="archived">Archived entries</option><option value="all">All entries</option></select></label><div className="column-selector"><button aria-expanded={columnsOpen} onClick={() => { setDraftColumns(columns); setColumnsOpen((current) => !current); }}>Columns</button>{columnsOpen && <div className="column-popover"><b>Visible columns</b>{DIRECTORY_COLUMNS.map(([id, label]) => <label key={id}><input type="checkbox" disabled={id === "resource"} checked={id === "resource" || draftColumns.includes(id)} onChange={(e) => setDraftColumns((current) => e.target.checked ? [...current, id] : current.filter((key) => key !== id))}/>{label}{id === "resource" && <small>Required</small>}</label>)}<footer><button onClick={() => setDraftColumns(DIRECTORY_COLUMNS.map(([id]) => id))}>Select All</button><button onClick={() => setDraftColumns(DEFAULT_DIRECTORY_COLUMNS)}>Reset to Default</button><button className="primary" onClick={applyColumns}>Apply</button></footer></div>}</div></div>
     <Stats values={[[visible.length,"Total resources"],[visible.filter((item) => item.entry_type === "platform").length,"Platforms"],[visible.filter((item) => item.entry_type === "skillset").length,"Skillsets"],[visible.filter((item) => item.governance_flagged).length,"Governance flags"],[visible.length ? `${Math.round(visible.reduce((sum,item) => sum+(item.governance_score||0),0)/visible.length)}%` : "—","Average governance risk"]]}/>
-    {busy ? <Loading/> : visible.length === 0 ? <Empty title="No resources found" text="Add an entry or select a different company." action={canEdit && <button className="primary" onClick={open}>Add resource</button>}/> : <>
+    {loadError ? <div className="page-load-error" role="alert"><h2>Resource Directory could not be refreshed</h2><p>{loadError}</p><button className="primary" onClick={retry}>Retry</button></div> : busy ? <Loading/> : visible.length === 0 ? <Empty title="No published resources found" text="Approved, governance-cleared resources appear here. Your drafts and pending records remain in My Resources." action={canEdit && <button className="primary" onClick={open}>Add resource</button>}/> : <>
       <div className="directory-table-wrapper"><table className="resource-directory-table"><thead><tr>{DIRECTORY_COLUMNS.filter(([key]) => shown(key)).map(([key,label]) => <th key={key} className={`${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}-column`}>{label}</th>)}</tr></thead><tbody>{visible.map((agent) => <tr key={agent.id}>{DIRECTORY_COLUMNS.filter(([key]) => shown(key)).map(([key]) => <td key={key} className={`${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}-column`}>{cell(key,agent)}</td>)}</tr>)}</tbody></table></div>
       <div className="directory-mobile-cards">{visible.map((agent) => <article key={agent.id}><h2>{agent.name}</h2><dl><div><dt>Type</dt><dd>{agent.entry_type || "agent"}</dd></div><div><dt>Company</dt><dd>{agent.companies?.name || "Unassigned"}</dd></div><div><dt>Owner</dt><dd>{agent.owner_name || "—"}</dd></div><div><dt>Status</dt><dd><Pill text={agent.status}/></dd></div><div><dt>Risk</dt><dd>{agent.governance_score == null ? "Pending" : `${risk(agent)} · ${agent.governance_score}%`}</dd></div></dl><footer><button onClick={() => setDetails(agent)}>View Details</button>{agent.url && <a href={agent.url} target="_blank" rel="noreferrer">Open ↗</a>}{canEdit && <button onClick={() => edit(agent)}>Edit</button>}{admin && <button onClick={() => manage(agent.id,agent.status === "retired" ? "restore" : "archive")}>{agent.status === "retired" ? "Restore" : "Archive"}</button>}{admin && <button className="danger" onClick={() => remove(agent)}>Delete</button>}</footer></article>)}</div>
     </>}
@@ -1739,6 +1774,8 @@ function suggestedEntryName(form) {
     .slice(0, 80);
 }
 const FieldHelp = ({ children }) => <small className="field-help">{children}</small>;
+const RequiredLabel = ({ children }) => <>{children} <span className="required-marker" aria-hidden="true">*</span><span className="sr-only"> Required</span></>;
+const FieldError = ({ id, message }) => message ? <small id={id} className="field-error" role="alert">{message}</small> : null;
 function SearchableMultiSelect({ label, help, options, selected, setSelected }) {
   const [search, setSearch] = useState("");
   const visible = options.filter((option) =>
@@ -1952,12 +1989,16 @@ function AgentForm({
   close,
   saved,
 }) {
-  const draftData = registrationDraft?.draft_form_data || {};
+  const localDraftKey = `hub-resource-registration:${user.id}:${agent?.id || "new"}`;
+  const localDraftState = !agent && !registrationDraft ? readRegistrationDraft(sessionStorage, localDraftKey) : null;
+  const draftData = normalizeRegistrationDraft(registrationDraft?.draft_form_data || localDraftState?.form || {});
   const activeDepartments = departments.filter((row) => row.status === "active"),
     activeCategories = categories.filter((row) => row.status === "active"),
     activeUsers = users.filter((row) => row.status === "active"),
-    initialDepartmentManaged = activeDepartments.some((row) => row.name === agent?.department),
-    initialCategoryManaged = activeCategories.some((row) => row.name === agent?.category);
+    restoredDepartment = agent?.department || draftData.department || "",
+    restoredCategory = agent?.category || draftData.category || "",
+    initialDepartmentManaged = activeDepartments.some((row) => row.name === restoredDepartment),
+    initialCategoryManaged = activeCategories.some((row) => row.name === restoredCategory);
   const [form, setForm] = useState({
       entry_type: agent?.entry_type || draftData.entry_type || sessionStorage.getItem("hub-create-type") || "agent",
       company_id: agent?.company_id || draftData.company_id || "",
@@ -2018,46 +2059,99 @@ function AgentForm({
       technical_dependencies: agent?.technical_dependencies || draftData.technical_dependencies || "",
       business_criticality: agent?.business_criticality || draftData.business_criticality || "low",
       support_model: agent?.support_model || draftData.support_model || "creator_managed",
+      ...(!agent ? draftData : {}),
     }),
     [error, setError] = useState(""),
+    [fieldErrors, setFieldErrors] = useState({}),
     [draftMessage, setDraftMessage] = useState(""),
+    [draftSaving, setDraftSaving] = useState(false),
     [checking, setChecking] = useState(false),
     [nameEdited, setNameEdited] = useState(Boolean(agent || draftData.name)),
     [departmentChoice, setDepartmentChoice] = useState(
-      initialDepartmentManaged ? agent.department : agent?.department ? "__other__" : "",
+      initialDepartmentManaged ? restoredDepartment : restoredDepartment ? "__other__" : "",
     ),
     [categoryChoice, setCategoryChoice] = useState(
-      initialCategoryManaged ? agent.category : agent?.category ? "__other__" : "",
+      initialCategoryManaged ? restoredCategory : restoredCategory ? "__other__" : "",
     ),
     [customDepartment, setCustomDepartment] = useState(
-      initialDepartmentManaged ? "" : agent?.department || "",
+      initialDepartmentManaged ? "" : restoredDepartment,
     ),
     [customCategory, setCustomCategory] = useState(
-      initialCategoryManaged ? "" : agent?.category || "",
+      initialCategoryManaged ? "" : restoredCategory,
     ),
-    [customOwner, setCustomOwner] = useState(""),
+    [customOwner, setCustomOwner] = useState(draftData.custom_owner || localDraftState?.customOwner || ""),
     [authorizedPeople, setAuthorizedPeople] = useState(
-      userAccess.map((assignment) => assignment.user_id),
+      draftData.authorized_people || localDraftState?.authorizedPeople || userAccess.map((assignment) => assignment.user_id),
     ),
     [authorizedCompanies, setAuthorizedCompanies] = useState(
-      companyAccess.map((assignment) => assignment.company_id),
+      draftData.authorized_companies || localDraftState?.authorizedCompanies || companyAccess.map((assignment) => assignment.company_id),
     ),
-    [authorizedDepartments, setAuthorizedDepartments] = useState((departmentAccess || []).map((assignment) => assignment.department)),
-    [step, setStep] = useState(1),
-    [questionnaire, setQuestionnaire] = useState(() => initialQuestionnaire(assessment?.responses || {}, { accountable_owner_id: agent?.accountable_owner_id || currentUser.id }));
-  const [selectedLifecycleStages, setSelectedLifecycleStages] = useState((lifecycleMappings || []).map((item) => item.stage_id));
+    [authorizedDepartments, setAuthorizedDepartments] = useState(draftData.authorized_departments || localDraftState?.authorizedDepartments || (departmentAccess || []).map((assignment) => assignment.department)),
+    [step, setStep] = useState(draftData.registration_step || localDraftState?.step || 1),
+    [questionnaire, setQuestionnaire] = useState(() => ({ ...initialQuestionnaire(assessment?.responses || {}, { accountable_owner_id: agent?.accountable_owner_id || currentUser.id }), ...(draftData.governance_questionnaire || localDraftState?.questionnaire || {}) }));
+  const [selectedLifecycleStages, setSelectedLifecycleStages] = useState(draftData.selected_lifecycle_stage_ids || localDraftState?.selectedLifecycleStages || (lifecycleMappings || []).map((item) => item.stage_id));
+  const formRef = useRef(null), pendingFocus = useRef("");
   const canCompleteGovernance = !admin || form.accountable_owner_id === currentUser.id;
+  const fieldProps = (field) => ({
+    "data-registration-field": field,
+    "aria-invalid": Boolean(fieldErrors[field]),
+    "aria-describedby": fieldErrors[field] ? `${field}-error` : undefined,
+  });
   function set(k, v) {
     setForm((current) => ({ ...current, [k]: v }));
+    setFieldErrors((current) => {
+      if (!current[k]) return current;
+      const next = { ...current };
+      delete next[k];
+      return next;
+    });
   }
   function answerQuestion(id, field, value) {
     setQuestionnaire((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
   }
-  async function saveRegistrationDraft() {
-    if (!registrationDraft?.id) return;
-    const { error: draftError } = await supabase.from("resource_registration_drafts").update({ draft_form_data: { ...draftData, ...form, populated_from_start_here: registrationDraft.populated_fields || draftData.populated_from_start_here || [] }, selected_resource_type: form.entry_type, company_id: form.company_id || null, status: "draft", last_saved_at: new Date().toISOString() }).eq("id", registrationDraft.id);
-    if (draftError) return setError(`Draft could not be saved: ${draftError.message}`);
-    setError(""); setDraftMessage("Draft saved just now.");
+  function showValidationErrors(errors) {
+    const byField = Object.fromEntries(errors.map((item) => [item.field, `${item.label} is required.`]));
+    setFieldErrors(byField);
+    setError(registrationErrorSummary(errors));
+    if (errors[0]) {
+      pendingFocus.current = errors[0].field;
+      setStep(errors[0].step);
+    }
+  }
+  useEffect(() => {
+    if (!pendingFocus.current) return;
+    const field = pendingFocus.current;
+    requestAnimationFrame(() => {
+      const input = formRef.current?.querySelector(`[data-registration-field="${field}"]`);
+      input?.scrollIntoView({ behavior: "smooth", block: "center" });
+      input?.focus({ preventScroll: true });
+      pendingFocus.current = "";
+    });
+  }, [step, fieldErrors]);
+  async function persistDraft({ quiet = false, stepOverride = step } = {}) {
+    const snapshot = { form, questionnaire, selectedLifecycleStages, authorizedPeople, authorizedCompanies, authorizedDepartments, customOwner, step: stepOverride };
+    try { writeRegistrationDraft(sessionStorage, localDraftKey, snapshot); } catch (storageError) { console.warn("Local registration draft could not be saved", storageError); }
+    if (!registrationDraft?.id) {
+      if (!quiet) setDraftMessage("Draft saved in this browser just now.");
+      return true;
+    }
+    setDraftSaving(true);
+    const draftFormData = { ...draftData, ...form, registration_step: stepOverride, custom_owner: customOwner, governance_questionnaire: questionnaire, selected_lifecycle_stage_ids: selectedLifecycleStages, authorized_people: authorizedPeople, authorized_companies: authorizedCompanies, authorized_departments: authorizedDepartments, populated_from_start_here: registrationDraft.populated_fields || draftData.populated_from_start_here || [] };
+    const { error: draftError } = await supabase.from("resource_registration_drafts").update({ draft_form_data: draftFormData, selected_resource_type: form.entry_type, company_id: form.company_id || null, status: "draft", last_saved_at: new Date().toISOString() }).eq("id", registrationDraft.id);
+    setDraftSaving(false);
+    if (draftError) { setError(saveErrorMessage("registration draft", draftError)); return false; }
+    if (!quiet) setDraftMessage("Draft saved just now.");
+    return true;
+  }
+  async function goToStep(targetStep) {
+    if (checking || draftSaving) return;
+    const errors = targetStep > step ? validateRegistrationStep(form, step, { customOwner }) : [];
+    if (!await persistDraft({ quiet: true, stepOverride: errors.length ? step : targetStep })) return;
+    if (errors.length) { showValidationErrors(errors); return; }
+    setError("");
+    setFieldErrors({});
+    setDraftMessage("Draft saved just now.");
+    setStep(targetStep);
   }
   useEffect(() => {
     if (nameEdited) return;
@@ -2066,31 +2160,36 @@ function AgentForm({
   }, [form.entry_type, form.description, form.skills_summary, form.category, form.department, nameEdited]);
   async function submit(e) {
     e.preventDefault();
+    if (checking || draftSaving) return;
     setError("");
-    if (!form.company_id || !form.name.trim() || !form.description.trim() || !form.department.trim() || !form.category.trim() || !form.environment.trim()) { setStep(1); return setError("Complete the required Resource Information fields before submitting."); }
-    if (form.entry_type === "platform" && (!form.vendor.trim() || !form.access_request_instructions.trim())) { setStep(1); return setError("Complete the required Platform details before submitting."); }
-    if (!form.prompt.trim() && form.entry_type !== "product") { setStep(4); return setError("Add the current initial prompt before submitting."); }
+    if (!await persistDraft({ quiet: true })) return;
+    const validationErrors = validateRegistration(form, { customOwner });
+    if (validationErrors.length) { showValidationErrors(validationErrors); return; }
     const ownerName = form.owner_name === "Other" ? customOwner.trim() : form.owner_name.trim();
-    if (!ownerName) { setStep(1); return setError("Select or enter an accountable owner."); }
     const submission = { ...form, owner_name: ownerName };
     const possibleDuplicates = findDuplicates({ ...submission, id: agent?.id, alternate_urls: form.alternate_urls.split("\n").filter(Boolean), integrations: form.integrations }, allAgents || []);
     const exactMatch = possibleDuplicates.find((match) => match.exactUrl);
     let duplicateJustification = "";
     if (exactMatch) {
-      duplicateJustification = window.prompt(`The URL matches ${exactMatch.resource.name}. Explain why this is a different resource, or Cancel to update the existing record.`) || "";
-      if (!duplicateJustification.trim()) return setError("An exact URL match requires confirmation and a short justification. You can also cancel and update the existing resource.");
+      duplicateJustification = window.prompt(`The URL matches ${exactMatch.resource.name}. You may explain why this is a different resource. Leave this blank to continue creation and preserve the match for Admin review.`) || "";
+      if (!duplicateJustification.trim()) duplicateJustification = "Creator continued after reviewing the exact URL match warning.";
     }
     const deterministic = evaluateGovernance(questionnaire, { accountable_owner_id: form.accountable_owner_id || (!admin ? user.id : null) }, reviewThreshold);
     setChecking(true);
+    let confirmedResource = null;
     function saveFailure(stage, technicalError) {
       console.error(`Resource ${stage} failed`, technicalError);
       setChecking(false);
-      setError("We could not save this resource. Please refresh and try again. If the problem continues, contact an administrator.");
+      setError(saveErrorMessage(stage, technicalError));
     }
-    function savedWithAttention(stage, technicalError) {
+    async function savedWithAttention(stage, technicalError) {
       console.error(`Saved resource ${stage} failed`, technicalError);
       setChecking(false);
-      saved("The resource was saved, but part of its setup needs Admin attention before publication.");
+      sessionStorage.removeItem(localDraftKey);
+      await saved(`The resource was saved, but part of its setup needs Admin attention. ${saveErrorMessage(stage, technicalError)}`, {
+        ...deterministic,
+        savedResource: confirmedResource || { id: data.id, name: form.name, status: values.status, entry_type: form.entry_type },
+      });
     }
     const accessValues = admin
       ? {
@@ -2188,19 +2287,17 @@ function AgentForm({
     if (e1) {
       return saveFailure("record", e1);
     }
+    const { data: persistedResource, error: confirmationError } = await supabase
+      .from("agents")
+      .select("id,name,status,governance_status,entry_type,created_by,accountable_owner_id,created_at,updated_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (confirmationError || !persistedResource) {
+      return savedWithAttention("visibility confirmation", confirmationError || { message: "The database accepted the record, but the current access policy did not return it." });
+    }
+    confirmedResource = persistedResource;
     const platformMutation = form.entry_type === "platform"
-      ? supabase.from("platform_details").upsert({
-          agent_id: data.id,
-          vendor: form.vendor || null,
-          license_type: form.license_type || null,
-          access_request_instructions: form.access_request_instructions || null,
-          support_contact: form.support_contact || null,
-          data_classification_restrictions: form.data_classification_restrictions || null,
-          approved_use_guidance: form.approved_use_guidance || null,
-          prohibited_use_guidance: form.prohibited_use_guidance || null,
-          renewal_at: form.renewal_at ? `${form.renewal_at}T23:59:59.999Z` : null,
-          notes: form.platform_notes || null,
-        })
+      ? supabase.from("platform_details").upsert(platformDetailsPayload(form, data.id))
       : supabase.from("platform_details").delete().eq("agent_id", data.id);
     const { error: platformError } = await platformMutation;
     if (platformError) {
@@ -2227,7 +2324,7 @@ function AgentForm({
         id: version.id,
         agent_id: data.id,
         version_number: versionNumber,
-        prompt_text: form.prompt || `Product governance record: ${form.name}. ${form.description}`,
+        prompt_text: form.prompt || `Resource governance record: ${form.name}. ${form.description}`,
         change_explanation: agent
           ? "Resource details saved and deterministically reassessed."
           : "Initial prompt saved with its deterministic governance assessment.",
@@ -2322,17 +2419,18 @@ function AgentForm({
       if (notificationLinkError) console.error("Saved admin awareness resource link failed", notificationLinkError);
     }
     sessionStorage.removeItem("hub-create-type");
+    sessionStorage.removeItem(localDraftKey);
     const guidance = JSON.parse(sessionStorage.getItem("hub-classification-guidance") || "null");
     if (guidance) {
       await supabase.from("resource_classification_assessments").insert({ resource_id: data.id, answers: guidance.answers, recommended_classification: guidance.assessment.classification, accepted_classification: guidance.accepted, override_explanation: guidance.reason || null, technical_support_recommended: guidance.assessment.technicalSupport, explanation: guidance.assessment.explanation, next_steps: guidance.assessment.nextSteps, governance_considerations: guidance.assessment.governance, created_by: user.id });
       sessionStorage.removeItem("hub-classification-guidance");
     }
     setChecking(false);
-    saved(deterministic.status === "cleared" ? "Your resource was saved and cleared. Review the recommendations below to strengthen its governance." : deterministic.status === "assessment_pending" ? "Your resource was saved. Complete the missing governance information before publication." : "Your resource was saved and sent to Admin review because its risk score or a required safeguard needs attention.", deterministic);
+    await saved(deterministic.status === "cleared" ? "Your resource was saved and cleared. Review the recommendations below to strengthen its governance." : deterministic.status === "assessment_pending" ? "Your resource was saved. Complete the missing governance information before publication." : "Your resource was saved and sent to Admin review because its risk score or a required safeguard needs attention.", { ...deterministic, savedResource: confirmedResource });
   }
   return (
     <div className="backdrop">
-      <form className="modal compact resource-form" onSubmit={submit}>
+      <form ref={formRef} className="modal compact resource-form" onSubmit={submit} noValidate>
         <header>
           <div>
             <small>OPEN CREATION · GOVERNANCE MONITORED</small>
@@ -2344,7 +2442,7 @@ function AgentForm({
         </header>
         {registrationDraft && <div className="start-here-transfer" role="status"><b>Populated from Start Here</b><span>You can edit every transferred field. Your original assessment remains stored separately for audit history.</span><small>{(registrationDraft.populated_fields || draftData.populated_from_start_here || []).map((field) => field.replaceAll("_", " ")).join(" · ")}</small></div>}
         <nav className="form-steps" aria-label="Resource registration steps">
-          {["Resource Information", "Access Management", "Governance Check", "Review & Submit"].map((label, index) => <button key={label} type="button" className={step === index + 1 ? "active" : ""} aria-current={step === index + 1 ? "step" : undefined} onClick={() => setStep(index + 1)}><span>{index + 1}</span>{label}</button>)}
+          {["Resource Information", "Access Management", "Governance Check", "Review & Submit"].map((label, index) => <button key={label} type="button" disabled={checking || draftSaving} className={step === index + 1 ? "active" : ""} aria-current={step === index + 1 ? "step" : undefined} onClick={() => goToStep(index + 1)}><span>{index + 1}</span>{label}</button>)}
         </nav>
         {step === 1 && <>
         <label>
@@ -2361,10 +2459,10 @@ function AgentForm({
           </select>
         </label>
         <label>
-          Company
-          <FieldHelp>Select the Lead Ventures company that owns or primarily uses this resource. Company assignment supports organization and does not restrict access by itself.</FieldHelp>
+          <RequiredLabel>Company</RequiredLabel>
+          <FieldHelp>Required. Select the Lead Ventures company that owns or primarily uses this resource. Company assignment supports organization and does not restrict access by itself.</FieldHelp>
           <select
-            required
+            {...fieldProps("company_id")}
             value={form.company_id}
             onChange={(e) => set("company_id", e.target.value)}
           >
@@ -2375,24 +2473,26 @@ function AgentForm({
               </option>
             ))}
           </select>
+          <FieldError id="company_id-error" message={fieldErrors.company_id} />
         </label>
         <label>
-          Name
-          <FieldHelp>Enter a clear, recognizable name. A suggested name may be generated from the information you provide.</FieldHelp>
+          <RequiredLabel>Resource name</RequiredLabel>
+          <FieldHelp>Required. Enter a clear, recognizable name. A suggested name may be generated from the information you provide.</FieldHelp>
           <input
-            required
+            {...fieldProps("name")}
             value={form.name}
             onChange={(e) => {
               setNameEdited(true);
               set("name", e.target.value);
             }}
           />
+          <FieldError id="name-error" message={fieldErrors.name} />
         </label>
         <label>
-          Accountable owner
-          <FieldHelp>Select the person responsible for this resource, including its use, maintenance, and outcomes.</FieldHelp>
+          <RequiredLabel>Accountable owner</RequiredLabel>
+          <FieldHelp>Required. Select the person responsible for this resource, including its use, maintenance, and outcomes.</FieldHelp>
           <input
-            required
+            {...(form.owner_name === "Other" ? {} : fieldProps("owner_name"))}
             list="accountable-owner-options"
             disabled={!admin}
             value={form.owner_name}
@@ -2419,18 +2519,21 @@ function AgentForm({
             ))}
             <option value="Other" />
           </datalist>
+          {form.owner_name !== "Other" && <FieldError id="owner_name-error" message={fieldErrors.owner_name} />}
         </label>
         {form.owner_name === "Other" && (
           <label>
-            Other accountable owner
-            <input required value={customOwner} onChange={(e) => setCustomOwner(e.target.value)} />
+            <RequiredLabel>Other accountable owner</RequiredLabel>
+            <FieldHelp>Required. Enter the name of the person accountable for this resource.</FieldHelp>
+            <input {...fieldProps("owner_name")} value={customOwner} onChange={(e) => { setCustomOwner(e.target.value); setFieldErrors((current) => ({ ...current, owner_name: "" })); }} />
+            <FieldError id="owner_name-error" message={fieldErrors.owner_name} />
           </label>
         )}
         <label>
-          Department
-          <FieldHelp>Select the business department primarily responsible for this resource.</FieldHelp>
+          <RequiredLabel>Department</RequiredLabel>
+          <FieldHelp>Required. Select the business department primarily responsible for this resource.</FieldHelp>
           <select
-            required
+            {...(departmentChoice === "__other__" ? {} : fieldProps("department"))}
             value={departmentChoice}
             onChange={(e) => {
               const value = e.target.value;
@@ -2444,25 +2547,28 @@ function AgentForm({
             ))}
             <option value="__other__">Other</option>
           </select>
+          {departmentChoice !== "__other__" && <FieldError id="department-error" message={fieldErrors.department} />}
         </label>
         {departmentChoice === "__other__" && (
           <label>
-            Other department
+            <RequiredLabel>Other department</RequiredLabel>
+            <FieldHelp>Required. Enter the responsible department.</FieldHelp>
             <input
-              required
+              {...fieldProps("department")}
               value={customDepartment}
               onChange={(e) => {
                 setCustomDepartment(e.target.value);
                 set("department", e.target.value);
               }}
             />
+            <FieldError id="department-error" message={fieldErrors.department} />
           </label>
         )}
         <label>
-          Category
-          <FieldHelp>Select the type of business work this resource supports.</FieldHelp>
+          <RequiredLabel>Category</RequiredLabel>
+          <FieldHelp>Required. Select the type of business work this resource supports.</FieldHelp>
           <select
-            required
+            {...(categoryChoice === "__other__" ? {} : fieldProps("category"))}
             value={categoryChoice}
             onChange={(e) => {
               const value = e.target.value;
@@ -2476,24 +2582,28 @@ function AgentForm({
             ))}
             <option value="__other__">Other</option>
           </select>
+          {categoryChoice !== "__other__" && <FieldError id="category-error" message={fieldErrors.category} />}
         </label>
         {categoryChoice === "__other__" && (
           <label>
-            Other category
+            <RequiredLabel>Other category</RequiredLabel>
+            <FieldHelp>Required. Enter the business-work category.</FieldHelp>
             <input
-              required
+              {...fieldProps("category")}
               value={customCategory}
               onChange={(e) => {
                 setCustomCategory(e.target.value);
                 set("category", e.target.value);
               }}
             />
+            <FieldError id="category-error" message={fieldErrors.category} />
           </label>
         )}
         <label className="full">
-          Purpose and description
-          <FieldHelp>Explain the business problem this resource addresses, who will use it, and the expected outcome.</FieldHelp>
-          <textarea required value={form.description} onChange={(e) => set("description", e.target.value)} />
+          <RequiredLabel>Purpose and description</RequiredLabel>
+          <FieldHelp>Required. Explain the business problem this resource addresses, who will use it, and the expected outcome.</FieldHelp>
+          <textarea {...fieldProps("description")} value={form.description} onChange={(e) => set("description", e.target.value)} />
+          <FieldError id="description-error" message={fieldErrors.description} />
         </label>
         <label className="full">
           Capabilities or skills
@@ -2516,13 +2626,14 @@ function AgentForm({
           </select>
         </label>
         <label>
-          Where it runs
-          <FieldHelp>Identify where users access or operate it, such as ChatGPT, Gemini, Claude, Microsoft Copilot, a website, or an internal application.</FieldHelp>
+          <RequiredLabel>Where it runs</RequiredLabel>
+          <FieldHelp>Required. Identify where users access or operate it, such as ChatGPT, Gemini, Claude, Microsoft Copilot, a website, or an internal application.</FieldHelp>
           <input
-            required
+            {...fieldProps("environment")}
             value={form.environment}
             onChange={(e) => set("environment", e.target.value)}
           />
+          <FieldError id="environment-error" message={fieldErrors.environment} />
         </label>
         <label>
           URL
@@ -2582,9 +2693,10 @@ function AgentForm({
             <legend>Platform details</legend>
             <p className="field-help">Document how the approved platform is licensed, requested, supported, and used safely.</p>
             <label>
-              Vendor
-              <FieldHelp>Enter the company that provides the platform.</FieldHelp>
-              <input required value={form.vendor} onChange={(e) => set("vendor", e.target.value)} />
+              <RequiredLabel>Vendor</RequiredLabel>
+              <FieldHelp>Required for Platforms. Enter the company that provides the platform.</FieldHelp>
+              <input {...fieldProps("vendor")} value={form.vendor} onChange={(e) => set("vendor", e.target.value)} />
+              <FieldError id="vendor-error" message={fieldErrors.vendor} />
             </label>
             <label>
               License type
@@ -2592,9 +2704,10 @@ function AgentForm({
               <input value={form.license_type} onChange={(e) => set("license_type", e.target.value)} />
             </label>
             <label className="full">
-              Access request instructions
-              <FieldHelp>Explain exactly how a person requests a license or account and who approves it.</FieldHelp>
-              <textarea required value={form.access_request_instructions} onChange={(e) => set("access_request_instructions", e.target.value)} />
+              <RequiredLabel>Access request instructions</RequiredLabel>
+              <FieldHelp>Required for Platforms. Explain exactly how a person requests a license or account and who approves it.</FieldHelp>
+              <textarea {...fieldProps("access_request_instructions")} value={form.access_request_instructions} onChange={(e) => set("access_request_instructions", e.target.value)} />
+              <FieldError id="access_request_instructions-error" message={fieldErrors.access_request_instructions} />
             </label>
             <label>
               Support contact
@@ -2769,14 +2882,15 @@ function AgentForm({
         </>}
         {step === 4 && <>
         <label className="full">
-          Initial prompt
-          <FieldHelp>Enter the current system instructions or primary prompt. Do not include passwords, API keys, confidential customer information, or other secrets.</FieldHelp>
+          {["agent","skillset"].includes(form.entry_type) ? <RequiredLabel>Initial prompt</RequiredLabel> : "Initial prompt (optional)"}
+          <FieldHelp>{["agent","skillset"].includes(form.entry_type) ? "Required. " : "Optional for Platforms and Products. "}Enter the current system instructions or primary prompt. Do not include passwords, API keys, confidential customer information, or other secrets.</FieldHelp>
           <textarea
-            required={form.entry_type !== "product"}
+            {...fieldProps("prompt")}
             value={form.prompt}
             onChange={(e) => set("prompt", e.target.value)}
           />
-          {form.entry_type === "product" && <FieldHelp>A Product may be assessed from its documented purpose when it does not use a reusable AI prompt.</FieldHelp>}
+          <FieldError id="prompt-error" message={fieldErrors.prompt} />
+          {["platform","product"].includes(form.entry_type) && <FieldHelp>A {form.entry_type} may be assessed from its documented purpose when it does not use a reusable AI prompt.</FieldHelp>}
         </label>
         <section className="full review-summary">
           <h3>Review before submitting</h3>
@@ -2787,18 +2901,18 @@ function AgentForm({
         {error && <div className="message">{error}</div>}
         {draftMessage && <div className="saved-message" role="status">{draftMessage}</div>}
         <footer>
-          <button type="button" onClick={close}>
+          <button type="button" disabled={checking || draftSaving} onClick={close}>
             Cancel
           </button>
-          {registrationDraft && <button type="button" onClick={saveRegistrationDraft}>Save Draft</button>}
-          {step > 1 && <button type="button" onClick={() => setStep((current) => current - 1)}>Back</button>}
-          {step < 4 && <button type="button" className="primary" onClick={() => setStep((current) => current + 1)}>Continue</button>}
-          {step === 4 && <button className="primary" disabled={checking}>
-            {checking
-              ? "Saving and assessing…"
+          <button type="button" disabled={checking || draftSaving} onClick={() => persistDraft()}>{draftSaving ? "Saving…" : "Save draft"}</button>
+          {step > 1 && <button type="button" disabled={checking || draftSaving} onClick={() => goToStep(step - 1)}>Back</button>}
+          {step < 4 && <button type="button" disabled={checking || draftSaving} className="primary" onClick={() => goToStep(step + 1)}>{draftSaving ? "Saving…" : "Save and continue"}</button>}
+          {step === 4 && <button type="submit" className="primary" disabled={checking || draftSaving}>
+            {checking || draftSaving
+              ? "Saving…"
               : agent
-                ? "Save & assess"
-                : "Save resource & assess"}
+                ? "Save changes"
+                : "Create resource"}
           </button>}
         </footer>
       </form>
@@ -2885,17 +2999,20 @@ function QuestionnaireField({ statement, value = {}, change }) {
     </div>
   );
 }
-function AssessmentResult({ result, close }) {
+function AssessmentResult({ result, close, viewResource }) {
   const cleared = result.status === "cleared";
+  const savedResource = result.savedResource;
+  const locations = savedResource ? resourceLocations(savedResource) : [];
   return <div className="backdrop"><section className="modal compact assessment-result" role="dialog" aria-modal="true" aria-labelledby="assessment-result-title">
     <header><div><small>GOVERNANCE ASSESSMENT COMPLETE</small><h2 id="assessment-result-title">{result.overall_score}% {riskLabel(result.risk_band)} Risk</h2></div><button onClick={close}>×</button></header>
     <div className={`result-banner ${cleared ? "cleared" : "review"}`}>{cleared ? "Your resource was saved and cleared. Review the recommendations below to strengthen its governance." : result.status === "assessment_pending" ? "Your resource was saved. Additional information is needed before publication." : "Your resource was saved and sent to Admin review because its risk score or a required safeguard needs attention."}</div>
+    {savedResource && <section className="submission-receipt" role="status"><h3>Database save confirmed</h3><dl><div><dt>Resource</dt><dd>{savedResource.name}</dd></div><div><dt>Status</dt><dd><Pill text={savedResource.status}/></dd></div><div><dt>Available in</dt><dd>{locations.join(" and ")}</dd></div></dl><p>Pending or review items are visible in My Resources. The Resource Directory only shows approved, governance-cleared resources.</p></section>}
     <div className="category-score-grid">{GOVERNANCE_CATEGORIES.map((category) => <span key={category.id}><b>{category.label}</b>{result.category_scores[category.id]}% risk</span>)}</div>
     <section><h3>Responses that increased the score</h3>{result.drivers.length ? <ul>{result.drivers.map((driver) => <li key={driver.id}><b>{driver.response} · {driver.points} points</b> — {driver.statement}</li>)}</ul> : <p>No responses increased the risk score.</p>}</section>
     <section><h3>Required actions</h3>{result.overrides.length ? <ul>{result.overrides.map((item) => <li key={item.id}>{item.reason}</li>)}</ul> : <p>No mandatory safeguard actions were triggered.</p>}</section>
     <section><h3>Recommended improvements</h3>{result.recommendations.length ? <ul>{result.recommendations.map((item) => <li key={item}>{item}</li>)}</ul> : <p>Continue maintaining the documented safeguards.</p>}</section>
     <section><h3>Next step</h3><p>{result.status === "assessment_pending" ? "Complete the missing responses or explanations and resubmit the resource." : cleared ? "The resource is published according to its repository access settings." : "An Admin will review the assessment and may request clarification or changes."}</p></section>
-    <footer><button className="primary" onClick={close}>Done</button></footer>
+    <footer>{savedResource && <button className="primary" onClick={viewResource}>View Resource</button>}<button onClick={close}>Done</button></footer>
   </section></div>;
 }
 function Governance({ agents, assessments, clarifications, advisories, recommendations, attentionItems, admin, user, token, reload, notify, edit }) {
@@ -3098,7 +3215,7 @@ function LegacyGovernance({ agents, admin, review, retry }) {
     </>
   );
 }
-function Companies({ rows, agents, admin, open, edit }) {
+function Companies({ rows, agents, admin, open, edit, loadError, retry }) {
   return (
     <>
       <PageHead
@@ -3113,7 +3230,9 @@ function Companies({ rows, agents, admin, open, edit }) {
           )
         }
       />
-      {!admin ? (
+      {loadError ? (
+        <div className="page-load-error" role="alert"><h2>Companies could not be refreshed</h2><p>{loadError}</p><p>The last successfully loaded company list has been preserved.</p><button className="primary" onClick={retry}>Retry</button></div>
+      ) : !admin ? (
         <Empty
           title="Administrator access required"
           text="Only administrators can add and manage companies."

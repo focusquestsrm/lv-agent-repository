@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Background, Controls, MarkerType, MiniMap, ReactFlow, useEdgesState, useNodesState } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { supabase } from "./supabase";
-import { autoArrangeLifecycle, classifyLifecycleStructure, CONNECTION_TYPES, lifecycleListGroups, lifecycleSummary, MAPPING_RELATIONSHIPS, validateConnection } from "./lifecycleModel";
+import { autoArrangeLifecycle, classifyLifecycleStructure, CONNECTION_TYPES, lifecycleListGroups, lifecycleSummary, MAPPING_RELATIONSHIPS, normalizeLifecycleData, validateConnection } from "./lifecycleModel";
 import { PROPRIETARY_NOTICE } from "./lifecycles";
 import "./lifecycleBuilder.css";
 
-const titleCase = (value = "") => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const titleCase = (value = "") => String(value ?? "").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const Notice = () => <aside className="proprietary-notice" role="note">{PROPRIETARY_NOTICE}</aside>;
 const connectionStyle = (type) => ({ strokeWidth: type === "supporting" ? 1 : 2, strokeDasharray: ["feedback", "conditional"].includes(type) ? "7 5" : type === "nested" ? "2 4" : undefined, opacity: type === "supporting" ? .55 : 1 });
 
@@ -105,6 +105,11 @@ function LifecycleAdmin({ lifecycles, phases, stages, connections, mappings, vie
 }
 
 export function LifecycleExperience(props) {
-  if (props.mode === "admin") return <LifecycleAdmin {...props}/>;
-  return <CompanyLifecycleViewer {...props} admin={props.isAdmin}/>;
+  if (props.loadError) {
+    const denied = /permission/i.test(props.loadError);
+    return <section className="page-load-error lifecycle-load-error" role="alert"><small>{denied ? "ACCESS DENIED" : "LIFECYCLE DATA UNAVAILABLE"}</small><h1>{denied ? "You cannot view these operational lifecycles" : "Operational Lifecycles could not be loaded"}</h1><p>{props.loadError}</p><p>The Dashboard and other Hub pages remain available.</p><div><button className="primary" onClick={props.reload}>Retry</button><button onClick={props.onBack}>Return to Dashboard</button></div></section>;
+  }
+  const normalized = normalizeLifecycleData(props);
+  if (props.mode === "admin") return <LifecycleAdmin {...normalized}/>;
+  return <CompanyLifecycleViewer {...normalized} admin={props.isAdmin}/>;
 }

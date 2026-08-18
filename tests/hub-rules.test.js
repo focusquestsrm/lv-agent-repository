@@ -92,3 +92,20 @@ test("migrations cover RLS-sensitive lifecycle, Product, assessment, and draft w
   assert.match(migrations,/converted_to_registration_draft/);
   assert.match(migrations,/submitted_resource_id/);
 });
+
+test("dashboard tiles and resource registration actions have stable responsive layout", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/admin-actions.css", import.meta.url), "utf8");
+  assert.match(css, /grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\)/);
+  assert.match(app, /className="dashboard-container"/);
+  assert.match(css, /width:\s*min\(96%, 1800px\)/);
+  assert.match(css, /\.dashboard-container \.stats article\s*\{\s*min-width:\s*0/);
+  assert.match(css, /min-width:\s*1024px[\s\S]*max-width:\s*1279px[\s\S]*repeat\(6, minmax\(0, 1fr\)\)/);
+  assert.match(css, /max-width:\s*1023px[\s\S]*min-width:\s*768px[\s\S]*repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(css, /max-width:\s*479px[\s\S]*grid-template-columns:\s*1fr/);
+  assert.match(css, /\.modal\.compact\.resource-form > footer\s*\{[\s\S]*position:\s*sticky/);
+  assert.match(app, /validateRegistrationStep/);
+  assert.match(app, /type="submit" className="primary"/);
+  assert.match(app, /"Save and continue"/);
+  assert.match(app, /"Create resource"/);
+});
