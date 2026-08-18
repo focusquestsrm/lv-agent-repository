@@ -47,7 +47,7 @@ This package contains no demonstration records. `danielle@focusquest.com` and th
 
 1. Create a Supabase project.
 2. Open **SQL Editor**, paste `supabase/schema.sql`, and run it once.
-3. If `schema.sql` completed successfully, run migrations `006` through `022` in numeric order, except `004` and `005`. The new Hub migrations must run in this order: `018_hub_resource_stewardship.sql`, `019_operational_lifecycles.sql`, `020_lifecycle_security_templates.sql`, `021_product_suite.sql`, then `022_resource_department_access.sql`.
+3. If `schema.sql` completed successfully, run migrations `006` through `024` in numeric order, except `004` and `005`. The newest Hub migrations must run in this order: `018_hub_resource_stewardship.sql`, `019_operational_lifecycles.sql`, `020_lifecycle_security_templates.sql`, `021_product_suite.sql`, `022_resource_department_access.sql`, `023_start_here_assessment_workflow.sql`, then `024_operational_lifecycle_builder.sql`.
 4. Under **Authentication → URL Configuration**, add your Netlify production URL and local URL (`http://localhost:5173`) as allowed redirect URLs.
 5. Under **Authentication → Providers → Email**, enable email/password. Decide whether your team must confirm email addresses.
 6. Copy the Project URL and anonymous/public key from **Project Settings → API**.
@@ -117,6 +117,8 @@ If you already ran the original schema, run these migrations in order in the Sup
 17. `supabase/migrations/020_lifecycle_security_templates.sql`
 18. `supabase/migrations/021_product_suite.sql`
 19. `supabase/migrations/022_resource_department_access.sql`
+20. `supabase/migrations/023_start_here_assessment_workflow.sql`
+21. `supabase/migrations/024_operational_lifecycle_builder.sql`
 
 Do not rerun `schema.sql` on an existing installation. Migrations 004 and 005 are intentionally skipped. After migration 003, open **Companies** as an Admin and add each company under the Lead Ventures tenant. Existing resources and users can then be assigned to the appropriate company. Company assignment supports organization and filtering; it does not restrict resource access unless an Admin explicitly chooses **Selected Companies**. The directory includes a company dropdown, including companies that do not yet have a resource.
 
@@ -147,6 +149,10 @@ Migration 016 introduces the employee-facing, plain-language Likert assessment a
 Migration 017 stores per-user Directory columns with a local-storage fallback, owner assessment drafts, requests and deadlines for current owner-completed Governance Checks, and issue-focused review records. It adds indexes, owner/Admin RLS, an Admin-only request function, and automatically closes a pending owner request when the current Likert assessment is submitted. Run it once after migration 016.
 
 Migrations 018–022 implement The Hub resource metadata, Company Stewardship, deterministic classifications and duplicate records, company lifecycle graphs and RLS, lifecycle templates/versioning/safe deletion, Product as a fourth resource type, cycle-safe Product architecture, and department-scoped access. They are additive and idempotent. Lifecycle absence, standalone Product status, and unevaluated alignment never change the governance score or independently route a resource into governance review.
+
+Migration 023 adds the separate, auditable Start Here workflow. It stores structured assessment answers and rule versions, resumable resource-registration drafts, links submitted resources back to both records, and creates nonblocking Platform or Product Initiative awareness notifications for Sean and Danielle. Owner and tenant-Admin RLS policies protect assessments and drafts; the security-definer conversion function verifies ownership before creating a draft. Run migration 023 after migration 022 and before deploying the matching frontend.
+
+Migration 024 replaces the user-facing lifecycle-template workflow with direct lifecycle creation and a canvas-first administrative builder. It preserves lifecycle records and mappings, translates the legacy `active` status to `published`, retains an incomplete one-stage FocusQuest record as a draft, stores node positions and richer phase/stage/connection fields, copies mappings and access rules during versioning, and adds tenant-aware lifecycle RLS. The frontend uses `@xyflow/react` for the diagram canvas and `@dagrejs/dagre` for deterministic auto-layout. Optional lifecycle suggestions reuse the configured governance provider and its existing `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`; no new environment variable is required, and the manual builder remains fully functional without one.
 
 ## Operational lifecycle administration
 

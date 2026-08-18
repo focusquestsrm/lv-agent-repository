@@ -14,6 +14,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/lifecycle-suggest"
+  to = "/.netlify/functions/lifecycle-suggest"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

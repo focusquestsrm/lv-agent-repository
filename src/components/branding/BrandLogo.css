@@ -1,0 +1,3 @@
+.brand-logo{display:block;max-width:100%;height:auto;object-fit:contain;object-position:center;background:transparent!important;padding:0!important}.shell>aside .brand-logo-standard{width:170px;max-height:78px;margin:0 auto 26px}.brand-logo-large{width:min(360px,78vw);max-height:150px;margin:0 auto 24px}.brand-logo-tour{width:150px;max-height:62px;margin:0 0 14px}.auth .brand-logo{width:min(330px,82%);max-height:130px;margin:0 0 28px}.shell.light-theme>aside .brand-logo{border:0}
+@media(max-width:900px){.shell>aside .brand-logo-standard{width:58px;max-height:52px;margin-bottom:20px}}
+@media(max-width:600px){.shell>aside .brand-logo-standard{width:108px;max-height:48px;margin:0}.brand-logo-tour{width:125px}}
