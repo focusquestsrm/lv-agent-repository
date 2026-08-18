@@ -121,3 +121,12 @@ test("admin lifecycle route is isolated, direct-hash aware, and logs failed quer
   assert.match(boundary,/componentDidCatch/);
   assert.match(boundary,/this\.props\.children/);
 });
+
+test("lifecycle canvas synchronization cannot trigger a parent state update loop", () => {
+  const source = readFileSync(new URL("../src/LifecycleWorkspace.jsx", import.meta.url), "utf8");
+  assert.match(source, /const flowApi = useRef\(null\)/);
+  assert.match(source, /flowApi\.current=payload/);
+  assert.doesNotMatch(source, /setFlowApi\(/);
+  assert.match(source, /const preparedNodes = useMemo/);
+  assert.match(source, /const scoped=useMemo/);
+});
