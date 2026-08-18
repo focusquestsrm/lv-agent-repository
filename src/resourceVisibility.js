@@ -22,11 +22,12 @@ export function resourceLocations(resource) {
     : ["My Resources"];
 }
 
-export function safeDataError(error, fallback = "The requested data could not be loaded.") {
+export function safeDataError(error, fallback = "The requested data could not be loaded.", diagnosticReference = "") {
   if (!error) return "";
   const code = String(error.code || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24);
   const permission = code === "42501" || /permission|row-level security|not authorized/i.test(error.message || "");
-  return permission
+  const message = permission
     ? "You do not have permission to retrieve this information."
     : `${fallback}${code ? ` (Reference ${code})` : ""}`;
+  return diagnosticReference ? `${message} Diagnostic reference: ${diagnosticReference}.` : message;
 }

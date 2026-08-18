@@ -5,6 +5,7 @@ import { findDuplicates } from "./duplicates";
 import { DuplicateQueue, Lifecycles, Notice, ProductSuite, ResourceCompare, StartHere } from "./HubFeatures";
 import BrandLogo from "./components/branding/BrandLogo";
 import RouteErrorBoundary from "./RouteErrorBoundary";
+import { reportDataFailure, runDataRequest } from "./dataDiagnostics";
 import { normalizeRegistrationDraft, platformDetailsPayload, readRegistrationDraft, registrationErrorSummary, saveErrorMessage, validateRegistration, validateRegistrationStep, writeRegistrationDraft } from "./resourceRegistration";
 import { isArchivedResource, isMyResource, isPublishedResource, resourceLocations, safeDataError } from "./resourceVisibility";
 import "./startHere.css";
@@ -300,11 +301,11 @@ function Registry({ session, profile }) {
   const adminViews = ["users", "companies", "taxonomy", "access", "lifecycles-admin", "duplicates", "settings"];
   async function load() {
     setBusy(true);
-    const settle = (request) => Promise.resolve(request).catch((error) => ({ data: null, error }));
-    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, attention, settings, lc, lp, ls, lconn, lv, lm, dup, productLinks, departmentAccess, startAssessments, drafts, notifications] = await Promise.all([
+    const tables = ["agents", "prompt_versions", "profiles", "companies", "departments", "categories", "agent_user_access", "agent_company_access", "audit_log", "platform_details", "governance_assessments", "governance_clarifications", "ai_advisory_assessments", "governance_recommendations", "governance_attention_items", "app_settings", "operational_lifecycles", "lifecycle_phases", "lifecycle_stages", "lifecycle_connections", "lifecycle_viewers", "resource_lifecycle_mappings", "resource_duplicate_matches", "product_relationships", "resource_department_access", "start_here_assessments", "resource_registration_drafts", "admin_awareness_notifications"];
+    const requests = [
       supabase
         .from("agents")
-        .select("*,companies(name)")
+        .select("*,companies!agents_company_id_fkey(name)")
         .order("updated_at", { ascending: false }),
       supabase
         .from("prompt_versions")
@@ -341,16 +342,28 @@ function Registry({ session, profile }) {
       supabase.from("start_here_assessments").select("*").order("updated_at", { ascending: false }),
       supabase.from("resource_registration_drafts").select("*").order("last_saved_at", { ascending: false }),
       supabase.from("admin_awareness_notifications").select("*").order("created_at", { ascending: false }),
-    ].map(settle));
+    ];
+    const results = await Promise.all(requests.map((request, index) => runDataRequest({ table: tables[index], request })));
+    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, attention, settings, lc, lp, ls, lconn, lv, lm, dup, productLinks, departmentAccess, startAssessments, drafts, notifications] = results;
     const resourceError = a.error;
     const lifecycleResults = [["operational_lifecycles", lc], ["lifecycle_phases", lp], ["lifecycle_stages", ls], ["lifecycle_connections", lconn], ["lifecycle_viewers", lv], ["resource_lifecycle_mappings", lm]];
     const lifecycleFailures = lifecycleResults.filter(([, result]) => result.error);
     const lifecycleError = lifecycleFailures[0]?.[1]?.error;
-    if (lifecycleFailures.length) console.error("Operational lifecycle data load failed", lifecycleFailures.map(([table, result]) => ({ table, code: result.error?.code || "unknown", status: result.status || null })));
+    if (lifecycleFailures.length) {
+      console.error("Operational lifecycle data load failed", lifecycleFailures.map(([table, result]) => ({ table, reference: result.diagnosticReference })));
+    }
+    if (resourceError) {
+      await Promise.all([
+        runDataRequest({ operation: "DIAGNOSTIC SELECT BASE", table: "agents", request: supabase.from("agents").select("*").limit(1) }),
+        runDataRequest({ operation: "DIAGNOSTIC SELECT", table: "companies", request: supabase.from("companies").select("id,name").limit(1) }),
+        runDataRequest({ operation: "DIAGNOSTIC SELECT RELATIONSHIP", table: "agents -> companies!agents_company_id_fkey", request: supabase.from("agents").select("id,company_id,companies!agents_company_id_fkey(name)").limit(1) }),
+        runDataRequest({ operation: "DIAGNOSTIC SELECT ORDER", table: "agents.updated_at", request: supabase.from("agents").select("id,updated_at").order("updated_at", { ascending: false }).limit(1) }),
+      ]);
+    }
     setLoadErrors({
-      resources: safeDataError(resourceError, "Resources could not be refreshed."),
-      companies: safeDataError(c.error, "Companies could not be refreshed."),
-      lifecycles: safeDataError(lifecycleError, "Operational lifecycle data could not be loaded."),
+      resources: safeDataError(resourceError, "Resources could not be refreshed.", a.diagnosticReference),
+      companies: safeDataError(c.error, "Companies could not be refreshed.", c.diagnosticReference),
+      lifecycles: safeDataError(lifecycleError, "Operational lifecycle data could not be loaded.", lifecycleFailures[0]?.[1]?.diagnosticReference),
     });
     const details = pd.data || [];
     if (!resourceError) setAgents(
@@ -2180,16 +2193,16 @@ function AgentForm({
     const deterministic = evaluateGovernance(questionnaire, { accountable_owner_id: form.accountable_owner_id || (!admin ? user.id : null) }, reviewThreshold);
     setChecking(true);
     let confirmedResource = null;
-    function saveFailure(stage, technicalError) {
-      console.error(`Resource ${stage} failed`, technicalError);
+    function saveFailure(stage, technicalError, diagnostic = {}) {
+      const reference = reportDataFailure({ operation: diagnostic.operation || "MUTATION", table: diagnostic.table || "agents", result: diagnostic.result, error: technicalError });
       setChecking(false);
-      setError(saveErrorMessage(stage, technicalError));
+      setError(saveErrorMessage(stage, technicalError, reference));
     }
     async function savedWithAttention(stage, technicalError) {
-      console.error(`Saved resource ${stage} failed`, technicalError);
+      const reference = reportDataFailure({ operation: "POST-SAVE MUTATION", table: stage, error: technicalError });
       setChecking(false);
       sessionStorage.removeItem(localDraftKey);
-      await saved(`The resource was saved, but part of its setup needs Admin attention. ${saveErrorMessage(stage, technicalError)}`, {
+      await saved(`The resource was saved, but part of its setup needs Admin attention. ${saveErrorMessage(stage, technicalError, reference)}`, {
         ...deterministic,
         savedResource: confirmedResource || { id: data.id, name: form.name, status: values.status, entry_type: form.entry_type },
       });
@@ -2271,13 +2284,14 @@ function AgentForm({
       support_model: form.support_model || null,
     };
     const data = { id: agent?.id || crypto.randomUUID() };
-    let e1;
+    let e1, resourceMutationResult;
     if (agent) {
       const result = await supabase
         .from("agents")
         .update(values)
         .eq("id", agent.id);
       e1 = result.error;
+      resourceMutationResult = result;
     } else {
       // Avoid requesting the inserted row in the same command. The SELECT RLS
       // policy resolves access through the agents table and may not see a row
@@ -2286,9 +2300,10 @@ function AgentForm({
         .from("agents")
         .insert({ id: data.id, ...values, created_by: user.id });
       e1 = result.error;
+      resourceMutationResult = result;
     }
     if (e1) {
-      return saveFailure("record", e1);
+      return saveFailure("record", e1, { operation: agent ? "UPDATE" : "INSERT", table: "agents", result: resourceMutationResult });
     }
     const { data: persistedResource, error: confirmationError } = await supabase
       .from("agents")

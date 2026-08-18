@@ -78,3 +78,9 @@ test("Data API CORS migration preserves the former origin and allows the Hub pro
   assert.match(sql, /notify pgrst, 'reload config'/i);
   assert.doesNotMatch(sql, /disable row level security|drop table|truncate/i);
 });
+
+test("resource loader disambiguates the owning company from additional company access", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(app, /select\("\*,companies!agents_company_id_fkey\(name\)"\)/);
+  assert.doesNotMatch(app, /select\("\*,companies\(name\)"\)/);
+});

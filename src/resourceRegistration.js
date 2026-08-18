@@ -1,3 +1,5 @@
+import { sanitizeDiagnosticText } from "./dataDiagnostics.js";
+
 export const REGISTRATION_FIELDS = {
   company_id: { label: "Company", step: 1 },
   name: { label: "Resource name", step: 1 },
@@ -52,11 +54,13 @@ export function registrationErrorSummary(errors) {
   return errors.length ? `Please complete the following required fields: ${errors.map((item) => item.label).join(", ")}.` : "";
 }
 
-export function saveErrorMessage(stage, error) {
-  const message = String(error?.message || "Unknown database error").replace(/\s+/g, " ").trim();
+export function saveErrorMessage(stage, error, diagnosticReference = "") {
+  const message = sanitizeDiagnosticText(error?.message) || "Unknown database error";
   const permissionDenied = error?.code === "42501" || /row-level security|permission denied|not authorized/i.test(message);
-  if (permissionDenied) return `The ${stage} could not be saved because your account does not have permission for this operation.`;
-  return `The ${stage} could not be saved: ${message}`;
+  const summary = permissionDenied
+    ? `The ${stage} could not be saved because your account does not have permission for this operation.`
+    : `The ${stage} could not be saved: ${message}`;
+  return diagnosticReference ? `${summary} Diagnostic reference: ${diagnosticReference}.` : summary;
 }
 
 export function platformDetailsPayload(form, agentId) {
