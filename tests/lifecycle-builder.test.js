@@ -155,7 +155,7 @@ test("lifecycle toolbar wraps compact controls without horizontal scrolling", ()
   assert.match(source, /toolbar-group toolbar-create/);
   assert.match(source, /toolbar-group toolbar-save/);
   assert.match(css, /flex-wrap: wrap/);
-  assert.match(css, /font-size: 14px/);
+  assert.match(css, /font-size: var\(--text-ui\)/);
   assert.match(css, /min-height: 36px/);
   assert.doesNotMatch(css, /\.canvas-toolbar[\s\S]{0,250}overflow: auto/);
 });

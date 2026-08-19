@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { assessmentToRegistrationDraft, classifyResource, START_HERE_RULE_VERSION } from "../src/classification.js";
-import { compareResources, findDuplicates, normalizeUrl, tokenSimilarity } from "../src/duplicates.js";
+import { acronym, buildDuplicateCandidates, compareResources, findDuplicates, normalizeName, normalizeUrl, tokenSimilarity } from "../src/duplicates.js";
 import { LIFECYCLE_TEMPLATES, suggestLifecycleAlignment } from "../src/lifecycles.js";
 import { DEFAULT_REVIEW_THRESHOLD, evaluateGovernance, initialQuestionnaire } from "../src/governance.js";
 
@@ -62,6 +62,50 @@ test("duplicate detection recognizes exact URLs and similar descriptions", () =>
     { name:"New resource", url:null, alternate_urls:null },
     [{ id:"legacy", name:"Legacy resource", url:null, alternate_urls:null }],
   ));
+});
+
+test("layered duplicate detection recognizes exact names, acronyms, and overlapping evidence", () => {
+  assert.equal(normalizeName("  Lead-Ventures & Co. "), "lead ventures and co");
+  assert.equal(acronym("Customer Relationship Management Platform"), "crm");
+  const exactName = compareResources({ name:"Student Success Hub", entry_type:"agent" }, { id:"1", name:"student-success hub", entry_type:"agent" });
+  assert.equal(exactName.matchType, "exact_name");
+  assert.equal(exactName.score, 100);
+  assert.equal(exactName.deterministicDetails.exactName, true);
+  const vendor = compareResources({ name:"Sales workspace", vendor:"Acme One", company_id:"c1" }, { id:"2", name:"Pipeline tool", vendor:"acme-one", company_id:"c1" });
+  assert.equal(vendor.matchType, "exact_vendor");
+  assert.ok(vendor.score >= 92);
+  const candidates = buildDuplicateCandidates([{ id:"b", name:"CRM", entry_type:"platform" }, { id:"a", name:"Customer Relationship Management Platform", entry_type:"platform" }, { id:"c", name:"Unrelated payroll", entry_type:"product" }]);
+  assert.equal(candidates.length, 1);
+  assert.deepEqual([candidates[0].resourceId, candidates[0].matchingResourceId], ["a", "b"]);
+  assert.equal(candidates[0].aiEligible, true);
+});
+
+test("duplicate review remains advisory, tenant-scoped, and AI-gated", () => {
+  const ui = readFileSync(new URL("../src/HubFeatures.jsx", import.meta.url), "utf8");
+  const endpoint = readFileSync(new URL("../netlify/functions/duplicate-review.mjs", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../supabase/migrations/029_layered_duplicate_review.sql", import.meta.url), "utf8");
+  assert.match(ui, /Check all resources/);
+  assert.match(ui, /Keep separate/);
+  assert.match(ui, /Mark overlapping/);
+  assert.match(ui, /Mark complementary/);
+  assert.match(ui, /Reopen review/);
+  assert.match(endpoint, /similarity_score < 45/);
+  assert.match(endpoint, /resource_records_unchanged: true/);
+  assert.match(endpoint, /match\.tenant_key !== profile\.tenant_key/);
+  assert.match(migration, /resource_similarity_relationships/);
+  assert.match(migration, /profile\.tenant_key=resource_duplicate_matches\.tenant_key/);
+});
+
+test("application typography uses one compact sans-serif hierarchy", () => {
+  const main = readFileSync(new URL("../src/main.jsx", import.meta.url), "utf8");
+  const typography = readFileSync(new URL("../src/typography.css", import.meta.url), "utf8");
+  const componentCss = ["styles.css", "admin-actions.css", "startHere.css", "lifecycleBuilder.css"].map((name) => readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8")).join("\n");
+  assert.match(main, /import "\.\/typography\.css"/);
+  assert.match(typography, /--font-sans:\s*Inter,/);
+  assert.match(typography, /--text-base:\s*0\.9375rem/);
+  assert.match(typography, /\.resource-details dd[^{]*\{[^}]*font-size:\s*var\(--text-base\)/s);
+  assert.match(typography, /\.governance-flags article h2[^{]*\{[^}]*var\(--text-xl\)/s);
+  assert.doesNotMatch(componentCss, /Georgia|Times New Roman/);
 });
 
 test("templates represent phased and circular structures without fixed layout markup", () => {

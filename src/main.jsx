@@ -4,6 +4,7 @@ import App from "./App";
 import { APP_LOGO_ALT, APP_LOGO_URL, APP_NAME } from "./brand";
 import "./styles.css";
 import "./admin-actions.css";
+import "./typography.css";
 
 class ApplicationErrorBoundary extends React.Component {
   constructor(props) {

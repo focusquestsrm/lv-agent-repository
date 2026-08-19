@@ -758,7 +758,7 @@ function Registry({ session, profile }) {
           />
         )}
         {admin && view === "lifecycles-admin" && <RouteErrorBoundary routeKey={view} title="Operational Lifecycles could not be displayed" onRetry={load} onBack={() => setView("dashboard")}><Lifecycles mode="admin" isAdmin={admin} tenantKey={profile.tenant_key} lifecycles={lifecycles} phases={lifecyclePhases} stages={lifecycleStages} connections={lifecycleConnections} mappings={lifecycleMappings} viewers={lifecycleViewers} companies={companies} resources={agents} users={users} user={session.user} token={session.access_token} loadError={loadErrors.lifecycles} onBack={() => setView("dashboard")} reload={load} notify={setToast} /></RouteErrorBoundary>}
-        {admin && view === "duplicates" && <DuplicateQueue matches={duplicateMatches} resources={agents} notify={setToast} reload={load} />}
+        {admin && view === "duplicates" && <DuplicateQueue matches={duplicateMatches} resources={agents} notify={setToast} reload={load} user={session.user} token={session.access_token} />}
         {admin && view === "settings" && <AISettings user={session.user} />}
       </section>
       {accessModal && (
@@ -2435,7 +2435,7 @@ function AgentForm({
     });
     if (assessmentSaveError) return savedWithAttention("deterministic assessment", assessmentSaveError);
     if (possibleDuplicates.length) {
-      const { error: duplicateError } = await supabase.from("resource_duplicate_matches").upsert(possibleDuplicates.map((match) => ({ resource_id: data.id, matching_resource_id: match.resourceId, match_type: match.matchType, similarity_score: match.score, reasons: match.reasons, normalized_url: match.matchedUrl, creator_resolution: exactMatch ? "continued_creation" : "admin_review_requested", creator_justification: match.exactUrl ? duplicateJustification : null, created_by: user.id })), { onConflict: "resource_id,matching_resource_id,match_type" });
+      const { error: duplicateError } = await supabase.from("resource_duplicate_matches").upsert(possibleDuplicates.map((match) => ({ resource_id: data.id, matching_resource_id: match.resourceId, match_type: match.matchType, similarity_score: match.score, reasons: match.reasons, normalized_url: match.matchedUrl, deterministic_details: match.deterministicDetails, creator_resolution: exactMatch ? "continued_creation" : "admin_review_requested", creator_justification: match.exactUrl ? duplicateJustification : null, created_by: user.id })), { onConflict: "resource_id,matching_resource_id,match_type" });
       if (duplicateError) console.error("Saved resource duplicate analysis failed", duplicateError);
     }
     const { error: mappingDeleteError } = await supabase.from("resource_lifecycle_mappings").delete().eq("resource_id", data.id);
