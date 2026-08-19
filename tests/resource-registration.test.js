@@ -35,12 +35,13 @@ test("Platform-only fields stay hidden and optional for other resource types", (
 });
 
 test("Start Here and database draft values normalize and restore Platform fields", () => {
-  const restored = normalizeRegistrationDraft({ ...validPlatform, access_scope: "company", platform_notes: null, prohibited_use_guidance: undefined });
+  const restored = normalizeRegistrationDraft({ ...validPlatform, access_scope: "company", platform_notes: null, prohibited_use_guidance: undefined, target_industries: null });
   assert.equal(restored.vendor, "Example Vendor");
   assert.equal(restored.access_request_instructions, validPlatform.access_request_instructions);
   assert.equal(restored.access_scope, "entire_company");
   assert.equal(restored.platform_notes, "");
   assert.equal(restored.prohibited_use_guidance, "");
+  assert.equal(restored.target_industries, "");
 });
 
 test("local draft restoration preserves entered values and the current step", () => {

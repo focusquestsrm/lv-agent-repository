@@ -1,7 +1,7 @@
 const TRACKING_PARAMETERS = new Set(["fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"]);
 
 export function normalizeUrl(value = "") {
-  const text = value.trim();
+  const text = String(value ?? "").trim();
   if (!text) return "";
   try {
     const parsed = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
@@ -30,8 +30,13 @@ export function tokenSimilarity(left, right) {
 }
 
 function urlRelation(candidate, existing) {
-  const urlsA = [candidate.url, ...(candidate.alternate_urls || [])].map(normalizeUrl).filter(Boolean);
-  const urlsB = [existing.url, ...(existing.alternate_urls || [])].map(normalizeUrl).filter(Boolean);
+  const alternateUrls = (resource) => Array.isArray(resource?.alternate_urls)
+    ? resource.alternate_urls
+    : resource?.alternate_urls
+      ? [resource.alternate_urls]
+      : [];
+  const urlsA = [candidate?.url, ...alternateUrls(candidate)].map(normalizeUrl).filter(Boolean);
+  const urlsB = [existing?.url, ...alternateUrls(existing)].map(normalizeUrl).filter(Boolean);
   for (const a of urlsA) for (const b of urlsB) {
     if (a === b) return { score: 100, reason: "Exact normalized URL match", matchType: "exact_url", matchedUrl: a };
     const hostA = a.split("/")[0], hostB = b.split("/")[0];

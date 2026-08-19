@@ -17,7 +17,7 @@ const blank = (value) => value == null || String(value).trim() === "";
 
 export function normalizeRegistrationDraft(data = {}) {
   const normalized = { ...data };
-  for (const field of ["company_id","name","description","owner_name","department","category","environment","vendor","license_type","access_request_instructions","support_contact","data_classification_restrictions","approved_use_guidance","prohibited_use_guidance","platform_notes","prompt","url","logo_url","intended_users","technical_dependencies","integrations","alternate_urls","documentation_links","product_notes"]) {
+  for (const field of ["company_id","name","description","owner_name","department","category","environment","vendor","license_type","access_request_instructions","support_contact","data_classification_restrictions","approved_use_guidance","prohibited_use_guidance","platform_notes","prompt","url","logo_url","intended_users","technical_dependencies","integrations","alternate_urls","target_industries","documentation_links","product_notes"]) {
     if (normalized[field] == null) normalized[field] = "";
   }
   if (normalized.access_scope === "company") normalized.access_scope = "entire_company";

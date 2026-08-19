@@ -49,6 +49,7 @@ test("Start Here UI supports nonblocking overrides, resume, and linked final sub
 test("URL normalization ignores scheme, www, trailing slash, and tracking parameters", () => {
   assert.equal(normalizeUrl("HTTPS://WWW.Example.com/demo/?utm_source=test"), "example.com/demo");
   assert.equal(normalizeUrl("http://example.com/demo"), "example.com/demo");
+  assert.equal(normalizeUrl(null), "");
 });
 
 test("duplicate detection recognizes exact URLs and similar descriptions", () => {
@@ -57,6 +58,10 @@ test("duplicate detection recognizes exact URLs and similar descriptions", () =>
   assert.equal(exact.score, 100);
   assert.ok(tokenSimilarity("student enrollment success", "student success platform") >= 20);
   assert.equal(findDuplicates({ name:"Student success agent", description:"Improve student enrollment and success" }, [{ id:"2", name:"Student success helper", description:"Student enrollment success support" }]).length, 1);
+  assert.doesNotThrow(() => findDuplicates(
+    { name:"New resource", url:null, alternate_urls:null },
+    [{ id:"legacy", name:"Legacy resource", url:null, alternate_urls:null }],
+  ));
 });
 
 test("templates represent phased and circular structures without fixed layout markup", () => {

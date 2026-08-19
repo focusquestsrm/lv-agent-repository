@@ -9,6 +9,7 @@ import { reportDataFailure, runDataRequest } from "./dataDiagnostics";
 import { normalizeRegistrationDraft, platformDetailsPayload, readRegistrationDraft, registrationErrorSummary, saveErrorMessage, validateRegistration, validateRegistrationStep, writeRegistrationDraft } from "./resourceRegistration";
 import { isArchivedResource, isMyResource, isPublishedResource, resourceLocations, safeDataError } from "./resourceVisibility";
 import "./startHere.css";
+const splitLines = (value) => String(value ?? "").split("\n").map((item) => item.trim()).filter(Boolean);
 export default function App() {
   const [session, setSession] = useState(null),
     [profile, setProfile] = useState(null),
@@ -2197,7 +2198,7 @@ function AgentForm({
     if (validationErrors.length) { showValidationErrors(validationErrors); return; }
     const ownerName = form.owner_name === "Other" ? customOwner.trim() : form.owner_name.trim();
     const submission = { ...form, owner_name: ownerName };
-    const possibleDuplicates = findDuplicates({ ...submission, id: agent?.id, alternate_urls: form.alternate_urls.split("\n").filter(Boolean), integrations: form.integrations }, allAgents || []);
+    const possibleDuplicates = findDuplicates({ ...submission, id: agent?.id, alternate_urls: splitLines(form.alternate_urls), integrations: form.integrations || "" }, allAgents || []);
     const exactMatch = possibleDuplicates.find((match) => match.exactUrl);
     let duplicateJustification = "";
     if (exactMatch) {
@@ -2273,20 +2274,20 @@ function AgentForm({
       commercial_status: form.commercial_status,
       intended_users: form.intended_users || null,
       hosted_url: form.hosted_url || form.url || null,
-      alternate_urls: form.alternate_urls.split("\n").map((x) => x.trim()).filter(Boolean),
+      alternate_urls: splitLines(form.alternate_urls),
       hosting_environment: form.hosting_environment || form.environment,
       company_controlled_hosting: form.company_controlled_hosting === "" ? null : form.company_controlled_hosting === "true",
       admin_control_confirmed: form.admin_control_confirmed === "" ? null : form.admin_control_confirmed === "true",
-      integrations: form.integrations.split("\n").map((x) => x.trim()).filter(Boolean),
+      integrations: splitLines(form.integrations),
       review_date: form.review_date || null,
       stewardship_status: form.stewardship_status,
       product_family: form.entry_type === "product" ? form.product_family || null : null,
       target_market: form.entry_type === "product" ? form.target_market || null : null,
-      target_industries: form.entry_type === "product" ? form.target_industries.split("\n").map((x) => x.trim()).filter(Boolean) : [],
+      target_industries: form.entry_type === "product" ? splitLines(form.target_industries) : [],
       demo_url: form.entry_type === "product" ? form.demo_url || null : null,
       development_stage: form.entry_type === "product" ? form.development_stage : null,
       pricing_model: form.entry_type === "product" ? form.pricing_model || null : null,
-      documentation_links: form.documentation_links.split("\n").map((x) => x.trim()).filter(Boolean),
+      documentation_links: splitLines(form.documentation_links),
       product_notes: form.entry_type === "product" ? form.product_notes || null : null,
       lifecycle_relationship: form.lifecycle_relationship,
       start_here_assessment_id: registrationDraft?.assessment_id || agent?.start_here_assessment_id || null,
