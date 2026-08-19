@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { supabase, configured } from "./supabase";
 import { ASSESSMENT_VERSION, DEFAULT_REVIEW_THRESHOLD, GOVERNANCE_CATEGORIES, LIKERT_OPTIONS, OVERRIDE_QUESTIONS, TRIGGER_QUESTIONS, evaluateGovernance, initialQuestionnaire, riskBand, riskLabel, visibleStatements } from "./governance";
 import { findDuplicates } from "./duplicates";
-import { DuplicateQueue, Lifecycles, Notice, ProductSuite, ResourceCompare, StartHere } from "./HubFeatures";
+import { DuplicateQueue, Lifecycles, Notice, ProductSuite, ResourceCompare } from "./HubFeatures";
+import ActionCenter from "./ActionCenter.jsx";
 import BrandLogo from "./components/branding/BrandLogo";
 import RouteErrorBoundary from "./RouteErrorBoundary";
 import { reportDataFailure, runDataRequest } from "./dataDiagnostics";
 import { normalizeRegistrationDraft, platformDetailsPayload, readRegistrationDraft, registrationErrorSummary, saveErrorMessage, validateRegistration, validateRegistrationStep, writeRegistrationDraft } from "./resourceRegistration";
 import { isArchivedResource, isMyResource, isPublishedResource, resourceLocations, safeDataError } from "./resourceVisibility";
 import "./startHere.css";
+import "./actionCenter.css";
 const splitLines = (value) => String(value ?? "").split("\n").map((item) => item.trim()).filter(Boolean);
 export default function App() {
   const [session, setSession] = useState(null),
@@ -251,7 +253,10 @@ function SetPassword({ done }) {
   );
 }
 function Registry({ session, profile }) {
-  const [view, setView] = useState(() => window.location.hash.replace(/^#\/?/, "") || "dashboard"),
+  const [view, setView] = useState(() => {
+    const route = window.location.hash.replace(/^#\/?/, "") || "dashboard";
+    return route === "start-here" ? "action-center" : route;
+  }),
     [agents, setAgents] = useState([]),
     [versions, setVersions] = useState([]),
     [users, setUsers] = useState([]),
@@ -266,6 +271,8 @@ function Registry({ session, profile }) {
     [advisories, setAdvisories] = useState([]),
     [recommendations, setRecommendations] = useState([]),
     [savedAttentionItems, setSavedAttentionItems] = useState([]),
+    [governanceRequests, setGovernanceRequests] = useState([]),
+    [activityAudit, setActivityAudit] = useState([]),
     [appSettings, setAppSettings] = useState({}),
     [lifecycles, setLifecycles] = useState([]),
     [lifecyclePhases, setLifecyclePhases] = useState([]),
@@ -276,9 +283,7 @@ function Registry({ session, profile }) {
     [duplicateMatches, setDuplicateMatches] = useState([]),
     [productRelationships, setProductRelationships] = useState([]),
     [resourceDepartmentAccess, setResourceDepartmentAccess] = useState([]),
-    [startHereAssessments, setStartHereAssessments] = useState([]),
     [registrationDrafts, setRegistrationDrafts] = useState([]),
-    [awarenessNotifications, setAwarenessNotifications] = useState([]),
     [registrationDraft, setRegistrationDraft] = useState(null),
     [assessmentResult, setAssessmentResult] = useState(null),
     [focusResourceId, setFocusResourceId] = useState(""),
@@ -299,10 +304,10 @@ function Registry({ session, profile }) {
     );
   const canEdit = ["admin", "editor"].includes(profile.role),
     admin = profile.role === "admin";
-  const adminViews = ["users", "companies", "taxonomy", "access", "lifecycles-admin", "duplicates", "settings"];
+  const adminViews = ["users", "companies", "taxonomy", "access", "lifecycles-admin", "duplicates", "approvals", "settings"];
   async function load() {
     setBusy(true);
-    const tables = ["agents", "prompt_versions", "profiles", "companies", "departments", "categories", "agent_user_access", "agent_company_access", "audit_log", "platform_details", "governance_assessments", "governance_clarifications", "ai_advisory_assessments", "governance_recommendations", "governance_attention_items", "app_settings", "operational_lifecycles", "lifecycle_phases", "lifecycle_stages", "lifecycle_connections", "lifecycle_viewers", "resource_lifecycle_mappings", "resource_duplicate_matches", "product_relationships", "resource_department_access", "start_here_assessments", "resource_registration_drafts", "admin_awareness_notifications"];
+    const tables = ["agents", "prompt_versions", "profiles", "companies", "departments", "categories", "agent_user_access", "agent_company_access", "audit_log", "audit_log", "platform_details", "governance_assessments", "governance_clarifications", "ai_advisory_assessments", "governance_recommendations", "governance_attention_items", "governance_assessment_requests", "app_settings", "operational_lifecycles", "lifecycle_phases", "lifecycle_stages", "lifecycle_connections", "lifecycle_viewers", "resource_lifecycle_mappings", "resource_duplicate_matches", "product_relationships", "resource_department_access", "resource_registration_drafts"];
     const requests = [
       supabase
         .from("agents")
@@ -324,12 +329,14 @@ function Registry({ session, profile }) {
         .like("action", "access_%")
         .order("created_at", { ascending: false })
         .limit(200),
+      supabase.from("audit_log").select("*").eq("actor_id", session.user.id).order("created_at", { ascending: false }).limit(100),
       supabase.from("platform_details").select("*"),
       supabase.from("governance_assessments").select("*").order("assessed_at", { ascending: false }),
       supabase.from("governance_clarifications").select("*").order("created_at", { ascending: false }),
       supabase.from("ai_advisory_assessments").select("*").order("created_at", { ascending: false }),
       supabase.from("governance_recommendations").select("*").order("created_at", { ascending: false }),
       supabase.from("governance_attention_items").select("*").order("created_at", { ascending: false }),
+      supabase.from("governance_assessment_requests").select("*").order("created_at", { ascending: false }),
       supabase.from("app_settings").select("setting_key,setting_value"),
       supabase.from("operational_lifecycles").select("*").order("updated_at", { ascending: false }),
       supabase.from("lifecycle_phases").select("*").order("sequence"),
@@ -340,12 +347,10 @@ function Registry({ session, profile }) {
       supabase.from("resource_duplicate_matches").select("*").order("created_at", { ascending: false }),
       supabase.from("product_relationships").select("*").order("created_at"),
       supabase.from("resource_department_access").select("*").order("department"),
-      supabase.from("start_here_assessments").select("*").order("updated_at", { ascending: false }),
       supabase.from("resource_registration_drafts").select("*").order("last_saved_at", { ascending: false }),
-      supabase.from("admin_awareness_notifications").select("*").order("created_at", { ascending: false }),
     ];
     const results = await Promise.all(requests.map((request, index) => runDataRequest({ table: tables[index], request })));
-    const [a, v, u, c, d, cat, ua, ca, audit, pd, ga, gc, aa, gr, attention, settings, lc, lp, ls, lconn, lv, lm, dup, productLinks, departmentAccess, startAssessments, drafts, notifications] = results;
+    const [a, v, u, c, d, cat, ua, ca, audit, activity, pd, ga, gc, aa, gr, attention, governanceRequestRows, settings, lc, lp, ls, lconn, lv, lm, dup, productLinks, departmentAccess, drafts] = results;
     const resourceError = a.error;
     const lifecycleResults = [["operational_lifecycles", lc], ["lifecycle_phases", lp], ["lifecycle_stages", ls], ["lifecycle_connections", lconn], ["lifecycle_viewers", lv], ["resource_lifecycle_mappings", lm]];
     const lifecycleFailures = lifecycleResults.filter(([, result]) => result.error);
@@ -382,11 +387,13 @@ function Registry({ session, profile }) {
     setUserAccess(ua.data || []);
     setCompanyAccess(ca.data || []);
     setAccessAudit(audit.data || []);
+    setActivityAudit(activity.data || []);
     setAssessments(ga.data || []);
     setClarifications(gc.data || []);
     setAdvisories(aa.data || []);
     setRecommendations(gr.data || []);
     setSavedAttentionItems(attention.data || []);
+    setGovernanceRequests(governanceRequestRows.data || []);
     setAppSettings(Object.fromEntries((settings.data || []).map((item) => [item.setting_key, item.setting_value])));
     if (!lc.error) setLifecycles(lc.data || []);
     if (!lp.error) setLifecyclePhases(lp.data || []);
@@ -397,9 +404,7 @@ function Registry({ session, profile }) {
     setDuplicateMatches(dup.data || []);
     setProductRelationships(productLinks.data || []);
     setResourceDepartmentAccess(departmentAccess.data || []);
-    setStartHereAssessments(startAssessments.data || []);
     setRegistrationDrafts(drafts.data || []);
-    setAwarenessNotifications(notifications.data || []);
     setBusy(false);
     return { resourceError, lifecycleError };
   }
@@ -414,7 +419,10 @@ function Registry({ session, profile }) {
     if (window.location.hash !== expected) window.history.pushState(null, "", expected);
   }, [view]);
   useEffect(() => {
-    const syncRoute = () => setView(window.location.hash.replace(/^#\/?/, "") || "dashboard");
+    const syncRoute = () => {
+      const route = window.location.hash.replace(/^#\/?/, "") || "dashboard";
+      setView(route === "start-here" ? "action-center" : route);
+    };
     window.addEventListener("hashchange", syncRoute);
     window.addEventListener("popstate", syncRoute);
     return () => { window.removeEventListener("hashchange", syncRoute); window.removeEventListener("popstate", syncRoute); };
@@ -524,9 +532,21 @@ function Registry({ session, profile }) {
       return false;
     }
   }
+  function openActionCenterItem(item) {
+    if (item.actionKind === "resume_registration_draft" && item.draftId) {
+      const draft = registrationDrafts.find((entry) => entry.id === item.draftId);
+      if (draft) { setRegistrationDraft(draft); setEditingAgent(null); setModal(true); return; }
+    }
+    if (item.actionKind === "edit_resource" && item.resourceId) {
+      const resource = agents.find((entry) => entry.id === item.resourceId);
+      if (resource) { setRegistrationDraft(null); setEditingAgent(resource); setModal(true); return; }
+    }
+    if (item.resourceId && item.route === "my-agents") setFocusResourceId(item.resourceId);
+    setView(item.route || "my-agents");
+  }
   const nav = [
     ["dashboard", "▥", "Dashboard"],
-    ["start-here", "→", "Start Here"],
+    ["action-center", "✓", "Action Center"],
     ["my-agents", "★", "My Resources"],
     ["agents", "▦", "Agents, Skillsets & Platforms"],
     ["products", "◆", "Product Suite"],
@@ -600,7 +620,7 @@ function Registry({ session, profile }) {
               {
                 {
                   dashboard: "Dashboard",
-                  "start-here": "Start Here",
+                  "action-center": "Action Center",
                   agents: "Resource Directory",
                   products: "Lead Ventures Product Suite",
                   lifecycles: "Company Lifecycles",
@@ -648,22 +668,17 @@ function Registry({ session, profile }) {
             agents={agents}
             companies={companies}
             busy={busy}
-            profile={profile}
-            userAccess={userAccess}
-            companyAccess={companyAccess}
             canEdit={canEdit}
             lifecycleStages={lifecycleStages}
             lifecycleMappings={lifecycleMappings}
             duplicateMatches={duplicateMatches}
-            attentionItems={savedAttentionItems}
-            notifications={awarenessNotifications}
             open={() => {
               setEditingAgent(null);
               setModal(true);
             }}
           />
         )}{" "}
-        {view === "start-here" && <StartHere user={session.user} companies={companies} assessments={startHereAssessments} drafts={registrationDrafts} admin={admin} onExit={() => setView("dashboard")} reload={load} notify={setToast} onRegister={canEdit ? (draft) => { setRegistrationDraft(draft); setEditingAgent(null); setModal(true); } : null} />}{" "}
+        {view === "action-center" && <ActionCenter resources={agents} registrationDrafts={registrationDrafts} governanceRequests={governanceRequests} clarifications={clarifications} attentionItems={savedAttentionItems} assessments={assessments} versions={versions} duplicateMatches={duplicateMatches} audit={activityAudit} userId={session.user.id} role={profile.role} onNavigate={openActionCenterItem} />}{" "}
         {view === "my-agents" && (
           <MyAgents
             rows={agents}
@@ -854,7 +869,7 @@ function Registry({ session, profile }) {
     </main>
   );
 }
-function Dashboard({ agents, companies, busy, canEdit, open, profile, lifecycleStages = [], lifecycleMappings = [], duplicateMatches = [], attentionItems = [], notifications = [] }) {
+function Dashboard({ agents, companies, busy, canEdit, open, lifecycleStages = [], lifecycleMappings = [], duplicateMatches = [] }) {
   const approved = agents.filter(isPublishedResource);
   const owned = [...new Set(approved.map((resource) => resource.owner_name).filter(Boolean))];
   const active = agents.filter((resource) => !isArchivedResource(resource));
@@ -865,7 +880,6 @@ function Dashboard({ agents, companies, busy, canEdit, open, profile, lifecycleS
   const gaps = lifecycleStages.filter((stage) => !lifecycleMappings.some((mapping) => mapping.stage_id === stage.id));
   const duplicates = duplicateMatches.filter((match) => !["dismissed", "resolved"].includes(match.status));
   const missingOwners = active.filter((resource) => !resource.accountable_owner_id && !resource.owner_name);
-  const myAttention = [...attentionItems.filter((item) => !item.resolved_at && (!item.owner_id || item.owner_id === profile?.id)), ...notifications.filter((item) => item.status === "unread" && (profile?.role === "admin" || item.user_id === profile?.id))];
   return (
     <div className="dashboard-container">
       <section className="dashboard-hero">
@@ -945,7 +959,6 @@ function Dashboard({ agents, companies, busy, canEdit, open, profile, lifecycleS
           <section className="panel operational-panel"><h2>Governance flags</h2><strong>{flags.length}</strong><p>{flags.length ? "Resources requiring governance follow-up. Risk does not prevent the resource from being saved." : "No visible resources currently require governance follow-up."}</p></section>
           <section className="panel operational-panel"><h2>Lifecycle coverage and gaps</h2><strong>{lifecycleStages.length - gaps.length} / {lifecycleStages.length}</strong><p>{gaps.length ? `${gaps.length} lifecycle stage${gaps.length === 1 ? " has" : "s have"} no mapped resource.` : "All visible lifecycle stages have coverage."}</p></section>
           <section className="panel operational-panel"><h2>Potential duplicates</h2><strong>{duplicates.length}</strong><p>{duplicates.length ? "Open potential matches are ready for review." : "No open duplicate matches."}</p></section>
-          <section className="panel operational-panel"><h2>Items requiring your attention</h2><strong>{myAttention.length}</strong><p>{myAttention.length ? "Open notifications or follow-up items are assigned to you." : "You are caught up."}</p></section>
           <section className="panel wide">
             <h2>Recently Added Resources</h2>
             <div className="table embedded">
@@ -2447,7 +2460,7 @@ function AgentForm({
       const { error: draftSubmitError } = await supabase.from("resource_registration_drafts").update({ status: "submitted", submitted_resource_id: data.id, selected_resource_type: form.entry_type, draft_form_data: { ...draftData, ...form }, last_saved_at: new Date().toISOString() }).eq("id", registrationDraft.id);
       if (draftSubmitError) console.error("Saved resource registration draft linkage failed", draftSubmitError);
       const { error: assessmentStatusError } = await supabase.from("start_here_assessments").update({ status: "registered", updated_at: new Date().toISOString() }).eq("id", registrationDraft.assessment_id);
-      if (assessmentStatusError) console.error("Saved Start Here status update failed", assessmentStatusError);
+      if (assessmentStatusError) console.error("Saved assessment history update failed", assessmentStatusError);
       const { error: notificationLinkError } = await supabase.from("admin_awareness_notifications").update({ resource_id: data.id }).eq("draft_id", registrationDraft.id);
       if (notificationLinkError) console.error("Saved admin awareness resource link failed", notificationLinkError);
     }
@@ -2473,7 +2486,7 @@ function AgentForm({
             ×
           </button>
         </header>
-        {registrationDraft && <div className="start-here-transfer" role="status"><b>Populated from Start Here</b><span>You can edit every transferred field. Your original assessment remains stored separately for audit history.</span><small>{(registrationDraft.populated_fields || draftData.populated_from_start_here || []).map((field) => field.replaceAll("_", " ")).join(" · ")}</small></div>}
+        {registrationDraft && <div className="start-here-transfer" role="status"><b>Restored registration draft</b><span>You can edit every restored field. Any original assessment remains stored separately for audit history.</span><small>{(registrationDraft.populated_fields || draftData.populated_from_start_here || []).map((field) => field.replaceAll("_", " ")).join(" · ")}</small></div>}
         <nav className="form-steps" aria-label="Resource registration steps">
           {["Resource Information", "Access Management", "Governance Check", "Review & Submit"].map((label, index) => <button key={label} type="button" disabled={checking || draftSaving} className={step === index + 1 ? "active" : ""} aria-current={step === index + 1 ? "step" : undefined} onClick={() => goToStep(index + 1)}><span>{index + 1}</span>{label}</button>)}
         </nav>
@@ -3829,10 +3842,10 @@ function Tour({ role, setView, close }) {
       text: "The Hub – Powering Lead Ventures is the proprietary, centralized source of truth for authorized company resources and operational lifecycles.",
     },
     {
-      view: "start-here",
-      eyebrow: "OPTIONAL START HERE GUIDANCE",
-      title: "Choose the right creation path",
-      text: "Start Here does not grant permission or require approval. Save and resume the wizard; when you continue, its answers prefill an editable registration draft without replacing the original assessment.",
+      view: "action-center",
+      eyebrow: "YOUR ACTION CENTER",
+      title: "See what needs your attention",
+      text: "Action Center brings together your drafts, requested changes, governance responses, review dates, and—when you are an Admin—compact links to existing review queues.",
     },
     {
       view: "agents",
